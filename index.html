@@ -11,28 +11,60 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Geometric Humanist font: Poppins -->
+    <!-- Font: Poppins (Geometric Humanist) -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
-      :root { --print-curve-max-height: 7.8in; }
-
       body { font-family: "Poppins", system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 
-      @page { margin: 0.5in; }
+      /* Landscape printing with default scaling */
+      @page {
+        size: landscape;
+        margin: 0.5in;
+      }
 
       @media print {
         body * { visibility: hidden; }
         .print-keep, .print-keep * { visibility: visible; }
-        .print-keep { position: relative; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
-        .print-hide { display: none !important; }
 
-        svg { width: 100%; max-height: var(--print-curve-max-height); }
-        table { page-break-before: avoid; width: 100%; border-collapse: collapse; font-size: 10pt; }
-        th, td { border: 1px solid #ccc; padding: 4px; }
-        .no-print { display: none !important; }
+        .print-keep {
+          position: static;
+          width: 100%;
+          margin: 0;
+          padding: 0;
+        }
+
+        /* Prevent curve from clipping */
+        .print-keep .rounded-2xl {
+          overflow: visible !important;
+          box-shadow: none !important;
+          border-color: #ccc !important;
+        }
+
+        svg {
+          width: 100%;
+          height: auto;
+        }
+
+        table {
+          page-break-before: avoid;
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 10pt;
+        }
+
+        th, td {
+          border: 1px solid #ccc;
+          padding: 4px;
+        }
+
+        .no-print,
+        .print-hide {
+          display: none !important;
+        }
       }
     </style>
   </head>
+
   <body class="bg-white">
     <div id="root"></div>
 
@@ -85,7 +117,6 @@
         const xMin = 40, xMax = 160, mean = 100;
         const rowGapY = 38, boxH = 36, boxGapX = 8;
         const topPad = 24, bottomPad = 70, baseHeight = 400, topRowGap = 16;
-
         const baseInnerHeight = baseHeight - topPad - bottomPad;
 
         const rowsNeeded = useMemo(() => {
@@ -161,6 +192,7 @@
             <div className="max-w-[1200px] mx-auto">
               <h1 className="text-2xl md:text-3xl font-semibold mb-2 print-hide">Interactive Normal Distribution</h1>
 
+              {/* Controls */}
               <div className="grid lg:grid-cols-3 gap-4 mb-6 print-hide">
                 <div className="p-4 rounded-2xl bg-white shadow-sm border">
                   <div className="flex items-center justify-between mb-3">
@@ -180,6 +212,7 @@
                   </label>
                 </div>
 
+                {/* Input form */}
                 <form onSubmit={addItem} className="p-4 rounded-2xl bg-white shadow-sm border lg:col-span-2">
                   <div className="grid md:grid-cols-4 gap-3 items-end">
                     <div>
@@ -222,6 +255,7 @@
                 </form>
               </div>
 
+              {/* Printable area */}
               <div className="print-keep">
                 <div className="rounded-2xl bg-white shadow-sm border overflow-hidden">
                   <svg width={width} height={height} className="w-full">
