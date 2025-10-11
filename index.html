@@ -29,6 +29,7 @@
   </head>
   <body class="bg-white">
     <div id="root"></div>
+
     <script type="text/babel">
       const { useState, useMemo } = React;
 
@@ -92,10 +93,7 @@
             let row = 0;
             while (true) {
               const rightEdge = rowsRight[row] ?? leftPad - boxGapX;
-              if (proposedX >= rightEdge + boxGapX) {
-                rowsRight[row] = proposedX + boxW;
-                break;
-              }
+              if (proposedX >= rightEdge + boxGapX) { rowsRight[row] = proposedX + boxW; break; }
               row += 1;
             }
           });
@@ -130,6 +128,7 @@
         }, [axisSd, innerHeight, topPad]);
 
         const { pathD } = curveGeom;
+
         const addItem = (e) => {
           e.preventDefault();
           const num = Number(value);
@@ -187,7 +186,7 @@
                     <div className="flex items-end gap-2">
                       <div className="flex-1">
                         <label className="text-sm">(Optional) Marker color</label>
-                        <input type="color" value={color||\"#000000\"} onChange={(e)=>setColor(e.target.value)} className="mt-1 w-full h-[42px] rounded-xl border cursor-pointer"/>
+                        <input type="color" value={color || "#000000"} onChange={(e)=>setColor(e.target.value)} className="mt-1 w-full h-[42px] rounded-xl border cursor-pointer"/>
                       </div>
                       <button type="submit" className="h-[42px] px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800">Add</button>
                     </div>
@@ -240,7 +239,21 @@
                         </tr>
                       </thead>
                       <tbody>
-                        {items.map((it)=>(<tr key={it.id}><td className="border p-2">{it.name}</td><td className="border p-2">{it.inputType}</td><td className="border p-2">{it.inputValue}</td><td className="border p-2">{Math.round(it.std100)}</td><td className="border p-2">{bandFor(it.std100)}</td><td className="border p-2"><span className="inline-block w-5 h-5 rounded-md border" style={{background:it.color||markerDefault}}></span></td><td className="border p-2"><button onClick={()=>removeItem(it.id)} className="px-2 py-1 rounded-md border hover:bg-red-50 hover:text-red-700">Remove</button></td></tr>))}
+                        {items.map((it)=>(
+                          <tr key={it.id}>
+                            <td className="border p-2">{it.name}</td>
+                            <td className="border p-2">{it.inputType}</td>
+                            <td className="border p-2">{it.inputValue}</td>
+                            <td className="border p-2">{Math.round(it.std100)}</td>
+                            <td className="border p-2">{bandFor(it.std100)}</td>
+                            <td className="border p-2">
+                              <span className="inline-block w-5 h-5 rounded-md border" style={{background:it.color||markerDefault}}></span>
+                            </td>
+                            <td className="border p-2">
+                              <button onClick={()=>removeItem(it.id)} className="px-2 py-1 rounded-md border hover:bg-red-50 hover:text-red-700">Remove</button>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
