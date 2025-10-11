@@ -14,24 +14,18 @@
     <!-- Geometric Humanist font: Poppins -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
-      :root { --print-curve-max-height: 7.8in; } /* allow more headroom for cards */
+      :root { --print-curve-max-height: 7.8in; }
 
       body { font-family: "Poppins", system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 
-      @page {
-        margin: 0.5in;
-      }
+      @page { margin: 0.5in; }
 
       @media print {
         body * { visibility: hidden; }
         .print-keep, .print-keep * { visibility: visible; }
-        .print-keep {
-          position: relative; left: 0; top: 0; width: 100%; margin: 0; padding: 0;
-        }
-        /* keep title hidden to prioritize curve+table on the page */
+        .print-keep { position: relative; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
         .print-hide { display: none !important; }
 
-        /* Fit curve and table on one page */
         svg { width: 100%; max-height: var(--print-curve-max-height); }
         table { page-break-before: avoid; width: 100%; border-collapse: collapse; font-size: 10pt; }
         th, td { border: 1px solid #ccc; padding: 4px; }
@@ -228,7 +222,6 @@
                 </form>
               </div>
 
-              <!-- PRINTABLE AREA -->
               <div className="print-keep">
                 <div className="rounded-2xl bg-white shadow-sm border overflow-hidden">
                   <svg width={width} height={height} className="w-full">
@@ -290,8 +283,6 @@
                   </div>
                 )}
               </div>
-              <!-- /PRINTABLE AREA -->
-
             </div>
           </div>
         );
