@@ -71,6 +71,7 @@
     <script type="text/babel">
       const { useState, useMemo } = React;
 
+      /* ---------- math ---------- */
       function gaussian(x, mean, sd) {
         const coef = 1 / (sd * Math.sqrt(2 * Math.PI));
         const exp = Math.exp(-0.5 * Math.pow((x - mean) / sd, 2));
@@ -91,16 +92,48 @@
         return value;
       }
 
-      const RANGE_BANDS = [
-        { label: "Very Low", min: -Infinity, max: 69, tint: "#fecaca" },
-        { label: "Low", min: 70, max: 79, tint: "#fed7aa" },
-        { label: "Below Avg", min: 80, max: 89, tint: "#fde68a" },
-        { label: "Average", min: 90, max: 109, tint: "#bbf7d0" },
-        { label: "High Avg", min: 110, max: 119, tint: "#bae6fd" },
-        { label: "Very High", min: 120, max: 129, tint: "#c7d2fe" },
-        { label: "Superior", min: 130, max: Infinity, tint: "#ddd6fe" },
+      /* ---------- qualitative ranges ---------- */
+      const BASE_RANGES = [
+        { min: -Infinity, max: 69,  tint: "#fecaca" }, // 0
+        { min: 70,       max: 79,  tint: "#fed7aa" }, // 1
+        { min: 80,       max: 89,  tint: "#fde68a" }, // 2
+        { min: 90,       max: 109, tint: "#bbf7d0" }, // 3
+        { min: 110,      max: 119, tint: "#bae6fd" }, // 4
+        { min: 120,      max: 129, tint: "#c7d2fe" }, // 5
+        { min: 130,      max: Infinity, tint: "#ddd6fe" }, // 6
       ];
 
+      const BAND_LABELS = {
+        en: [
+          "Very Low",
+          "Low",
+          "Below Avg",
+          "Average",
+          "High Avg",
+          "Very High",
+          "Superior",
+        ],
+        es: [
+          "Muy Bajo",
+          "Bajo",
+          "Low Average",
+          "Promedio",
+          "High Average",
+          "Superior",
+          "Muy Superior",
+        ],
+        yue: [
+          "非常低",
+          "低",
+          "低平均水平",
+          "平均",
+          "高平均水平",
+          "高",
+          "非常高",
+        ],
+      };
+
+      /* ---------- app ---------- */
       function BellCurveDashboard() {
         const [axisSd, setAxisSd] = useState(15);
         const [curveColor, setCurveColor] = useState("#bfe0ff99");
@@ -111,6 +144,14 @@
         const [color, setColor] = useState("");
         const [items, setItems] = useState([]);
         const [showBands, setShowBands] = useState(false);
+        const [showNumeric, setShowNumeric] = useState(true); // toggle numeric on markers
+        const [lang, setLang] = useState("en"); // en, es, yue
+
+        // Build language-specific range objects
+        const RANGE_BANDS = useMemo(() => {
+          const labels = BAND_LABELS[lang] || BAND_LABELS.en;
+          return BASE_RANGES.map((r, i) => ({ ...r, label: labels[i] }));
+        }, [lang]);
 
         const width = 1000, leftPad = 60, rightPad = 40;
         const innerWidth = width - leftPad - rightPad;
@@ -202,14 +243,34 @@
                       <button className={`px-3 py-1 rounded-full border ${axisSd===10?"bg-slate-900 text-white":"bg-white"}`} onClick={()=>setAxisSd(10)}>10</button>
                     </div>
                   </div>
+
                   <div className="flex items-center justify-between mt-4">
                     <label className="text-sm">Curve Color</label>
                     <input type="color" value={curveColor} onChange={(e)=>setCurveColor(e.target.value)} className="w-10 h-8 rounded-md border cursor-pointer"/>
                   </div>
+
                   <label className="mt-3 flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={showBands} onChange={(e)=>setShowBands(e.target.checked)} />
                     Show background bands
                   </label>
+
+                  <label className="mt-2 flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={showNumeric} onChange={(e)=>setShowNumeric(e.target.checked)} />
+                    Show numeric scores on markers
+                  </label>
+
+                  <div className="mt-3">
+                    <label className="text-sm block mb-1">Band language</label>
+                    <select
+                      className="w-full px-3 py-2 rounded-xl border"
+                      value={lang}
+                      onChange={(e)=>setLang(e.target.value)}
+                    >
+                      <option value="en">English</option>
+                      <option value="es">Español</option>
+                      <option value="yue">粵語 (Cantonese)</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Input form */}
@@ -258,26 +319,43 @@
               {/* Printable area */}
               <div className="print-keep">
                 <div className="rounded-2xl bg-white shadow-sm border overflow-hidden">
-                  <svg width={width} height={height} className="w-full">
-                    {showBands && RANGE_BANDS.map((b)=>{
+                  <svg width={1000} height={height} className="w-full">
+                    {showBands && RANGE_BANDS.map((b, idx)=>{
                       const x1=Math.max(xMin,b.min===-Infinity?xMin:b.min);
                       const x2=Math.min(xMax,b.max===Infinity?xMax:b.max);
                       const X=xScale(x1); const W=xScale(x2)-xScale(x1);
-                      return <g key={b.label}><rect x={X} y={topPad} width={W} height={innerHeight} fill={b.tint} opacity={0.35}/><text x={X+W/2} y={topPad-6} textAnchor="middle" className="fill-slate-600 text-[12px]">{b.label}</text></g>;
+                      return (
+                        <g key={idx}>
+                          <rect x={X} y={topPad} width={W} height={innerHeight} fill={b.tint} opacity={0.35}/>
+                          <text x={X+W/2} y={topPad-6} textAnchor="middle" className="fill-slate-600 text-[12px]">{b.label}</text>
+                        </g>
+                      );
                     })}
                     <path d={pathD} fill={curveColor} stroke="#0f172a22" strokeWidth={1}/>
                     {(() => {
                       const sorted=[...items].sort((a,b)=>a.std100-b.std100);
                       const rowsRight=[],nodes=[];
                       sorted.forEach(it=>{
-                        const label=it.name; const val=Math.round(it.std100);
-                        const cat=bandFor(it.std100); const fill=it.color||markerDefault;
-                        const x=xScale(it.std100); const boxW=Math.max(84,label.length*6+24);
+                        const label=it.name;
+                        const val=Math.round(it.std100);
+                        const cat=bandFor(it.std100);
+                        const fill=it.color||markerDefault;
+                        const x=xScale(it.std100);
+                        const boxW=Math.max(84,label.length*6+24);
                         const proposedX=Math.max(leftPad+4,Math.min(x-boxW/2,leftPad+innerWidth-boxW-4));
                         let row=0; while(true){const rE=rowsRight[row]??leftPad-8;if(proposedX>=rE+8){rowsRight[row]=proposedX+boxW;break;}row++; }
                         const aX=proposedX,aY=topPad+16+38*row;
-                        nodes.push(<g key={it.id}><rect x={aX} y={aY} width={boxW} height={36} rx={10} ry={10} fill={fill}/><text x={aX+boxW/2} y={aY+15} textAnchor="middle" className="fill-white text-[12px] font-medium">{label}</text><text x={aX+boxW/2} y={aY+28} textAnchor="middle" className="fill-white text-[11px]">{val} • {cat}</text></g>);
-                      }); return nodes;
+                        nodes.push(
+                          <g key={it.id}>
+                            <rect x={aX} y={aY} width={boxW} height={36} rx={10} ry={10} fill={fill}/>
+                            <text x={aX+boxW/2} y={aY+15} textAnchor="middle" className="fill-white text-[12px] font-medium">{label}</text>
+                            <text x={aX+boxW/2} y={aY+28} textAnchor="middle" className="fill-white text-[11px]">
+                              {showNumeric ? `${val} • ${cat}` : `${cat}`}
+                            </text>
+                          </g>
+                        );
+                      }); 
+                      return nodes;
                     })()}
                   </svg>
                 </div>
