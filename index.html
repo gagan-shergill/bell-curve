@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <title>Interactive Normal Distribution</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 
     <style>
-      body { font-family: "Poppins", system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      body { font-family: Georgia, "Times New Roman", Times, serif; }
 
       @page { size: landscape; margin: 0.5in; }
 
@@ -48,37 +48,22 @@
         return value;
       }
 
-      const BASE_RANGES = [
-        { min: -Infinity, max: 69, tint: "#fecaca" },
-        { min: 70, max: 79, tint: "#fed7aa" },
-        { min: 80, max: 89, tint: "#fde68a" },
-        { min: 90, max: 109, tint: "#bbf7d0" },
-        { min: 110, max: 119, tint: "#bae6fd" },
-        { min: 120, max: 129, tint: "#c7d2fe" },
-        { min: 130, max: Infinity, tint: "#ddd6fe" },
-      ];
-
       const BAND_LABELS = {
         en: ["Very Low","Low","Below Avg","Average","High Avg","Very High","Superior"],
         es: ["Muy Bajo","Bajo","Promedio Bajo","Promedio","Promedio Alto","Superior","Muy Superior"],
         yue: ["非常低","低","低平均水平","平均","高平均水平","高","非常高"],
       };
 
-      // Preset palette for cluster colors (assigned automatically to new clusters)
+      const BAND_TINTS = ["#fecaca","#fed7aa","#fde68a","#bbf7d0","#bae6fd","#c7d2fe","#ddd6fe"];
+
+      // z-cutpoints matching your original 15-SD boundaries (69/79/89/109/119/129)
+      const Z_CUTS = [-2, -1.3333333333, -0.6666666667, 0.6666666667, 1.3333333333, 2];
+
       const CLUSTER_PALETTE = [
-        "#0ea5ff", // blue
-        "#6366f1", // indigo
-        "#8b5cf6", // violet
-        "#14b8a6", // teal
-        "#22c55e", // green
-        "#f59e0b", // amber
-        "#f97316", // orange
-        "#f43f5e", // rose
-        "#334155", // slate
+        "#0ea5ff", "#6366f1", "#8b5cf6", "#14b8a6", "#22c55e",
+        "#f59e0b", "#f97316", "#f43f5e", "#334155"
       ];
 
-      // Marker color choice (persists until changed)
-      // If set to "", we use the cluster's assigned color automatically.
       const MARKER_COLOR_PRESETS = [
         { label: "Auto (cluster color)", value: "" },
         { label: "Blue", value: "#0ea5ff" },
@@ -93,11 +78,13 @@
       ];
 
       function BellCurveDashboard() {
+        const mean = 100;
+
         const [axisSd, setAxisSd] = useState(15);
         const [curveColor, setCurveColor] = useState("#bfe0ff99");
 
         const [name, setName] = useState("");
-        const [cluster, setCluster] = useState(""); // NEW: cluster/group field
+        const [cluster, setCluster] = useState("");
         const [type, setType] = useState("standard");
         const [value, setValue] = useState("");
 
@@ -106,41 +93,58 @@
         const [showNumeric, setShowNumeric] = useState(true);
         const [lang, setLang] = useState("en");
 
-        // NEW: group markers by cluster (separate vertical blocks)
         const [groupByCluster, setGroupByCluster] = useState(true);
+        const [markerPreset, setMarkerPreset] = useState(""); // persists until changed
 
-        // NEW: persistent marker color selection
-        const [markerPreset, setMarkerPreset] = useState(""); // "" = auto (cluster color)
+        const [clusterColors, setClusterColors] = useState({});
+        const [clusterOrder, setClusterOrder] = useState([]);
 
-        // Cluster color map + creation order
-        const [clusterColors, setClusterColors] = useState({});  // { clusterName: "#hex" }
-        const [clusterOrder, setClusterOrder] = useState([]);    // ["WISC-V", "Language", ...]
-
+        // SD-dependent bands (so labels/categories change when SD toggles)
         const RANGE_BANDS = useMemo(() => {
           const labels = BAND_LABELS[lang] || BAND_LABELS.en;
-          return BASE_RANGES.map((r, i) => ({ ...r, label: labels[i] }));
-        }, [lang]);
+          const cuts = Z_CUTS.map(z => mean + z * axisSd);
+          return [
+            { min: -Infinity, max: cuts[0], label: labels[0], tint: BAND_TINTS[0] },
+            { min: cuts[0], max: cuts[1], label: labels[1], tint: BAND_TINTS[1] },
+            { min: cuts[1], max: cuts[2], label: labels[2], tint: BAND_TINTS[2] },
+            { min: cuts[2], max: cuts[3], label: labels[3], tint: BAND_TINTS[3] },
+            { min: cuts[3], max: cuts[4], label: labels[4], tint: BAND_TINTS[4] },
+            { min: cuts[4], max: cuts[5], label: labels[5], tint: BAND_TINTS[5] },
+            { min: cuts[5], max: Infinity, label: labels[6], tint: BAND_TINTS[6] },
+          ];
+        }, [lang, axisSd]);
 
-        const width = 1000, leftPad = 60, rightPad = 40;
+        function bandFor(std100) {
+          const b = RANGE_BANDS.find(bb => std100 >= bb.min && std100 <= bb.max);
+          return b ? b.label : "";
+        }
+
+        // Shift curve right / prevent left labels clipping
+        const width = 1000;
+        const leftPad = 150;
+        const rightPad = 40;
         const innerWidth = width - leftPad - rightPad;
-        const xMin = 40, xMax = 160, mean = 100;
 
-        // marker box layout
-        const rowGapY = 38, boxH = 36, boxGapX = 8;
-        const clusterGapY = 22; // vertical spacing between cluster blocks
-        const topPad = 24, bottomPad = 70, baseHeight = 400, topRowGap = 16;
+        const xMin = 40;
+        const xMax = 160;
+
+        const rowGapY = 38;
+        const boxH = 36;
+        const boxGapX = 8;
+        const clusterGapY = 22;
+
+        const topPad = 24;
+        const bottomPad = 70;
+        const baseHeight = 400;
+        const topRowGap = 16;
 
         const xScale = (x) => leftPad + ((x - xMin) / (xMax - xMin)) * innerWidth;
 
-        const bandFor = (s) => (RANGE_BANDS.find(b => s >= b.min && s <= b.max) || {}).label || "";
-
-        // Assign a new color to a new cluster name
         function ensureClusterColor(clusterName) {
           const clean = (clusterName || "").trim();
           const key = clean || "Ungrouped";
           if (clusterColors[key]) return { key, color: clusterColors[key] };
 
-          // pick next palette color (cycle if needed)
           const nextIdx = clusterOrder.length % CLUSTER_PALETTE.length;
           const nextColor = CLUSTER_PALETTE[nextIdx];
 
@@ -150,49 +154,46 @@
           return { key, color: nextColor };
         }
 
-        const addItem = (e) => {
+        // ✅ NEW: recompute std100 live based on current axisSd
+        const displayItems = useMemo(() => {
+          return items.map(it => ({
+            ...it,
+            std100: toStd100(it.inputValue, it.inputType, axisSd)
+          }));
+        }, [items, axisSd]);
+
+        function addItem(e) {
           e.preventDefault();
           const num = Number(value);
           if (!isFinite(num)) return;
 
-          const std100 = toStd100(num, type, axisSd);
+          const { key, color } = ensureClusterColor(cluster);
+          const finalColor = markerPreset ? markerPreset : color;
 
-          // ensure cluster exists + has a default color
-          const { key: clusterKey, color: clusterColor } = ensureClusterColor(cluster);
-
-          // choose item color:
-          // - if markerPreset is set, use it
-          // - else use clusterColor (auto)
-          const itemColor = markerPreset ? markerPreset : clusterColor;
-
-          setItems(prev => [
+          setItems(prev => ([
             ...prev,
             {
               id: Math.random().toString(36).slice(2),
               name: name.trim() || "(Unnamed)",
-              cluster: clusterKey,
+              cluster: key,
               inputType: type,
               inputValue: num,
-              std100,
-              color: itemColor,
+              color: finalColor,
             }
-          ]);
+          ]));
 
           setName("");
           setValue("");
-          // keep cluster + markerPreset persistent until user changes them
-        };
+        }
 
-        const removeItem = (id) => setItems(prev => prev.filter(i => i.id !== id));
+        function removeItem(id) {
+          setItems(prev => prev.filter(i => i.id !== id));
+        }
 
-        // --- Layout computation ---
-        // If grouping is ON:
-        //  - each cluster gets its own row-packing (no mixing)
-        //  - clusters are stacked vertically, preserving clusters intact
+        // Marker packing (keeps clusters separate vertically)
         const layout = useMemo(() => {
           const getBoxW = (label) => Math.max(84, String(label).length * 6 + 24);
 
-          // helper: pack one cluster's items into rows (no overlap in the same row)
           function packRows(clusterItems) {
             const sorted = [...clusterItems].sort((a,b) => a.std100 - b.std100);
             const rowsRight = [];
@@ -221,27 +222,18 @@
             return { placed, rows: Math.max(1, rowsRight.length) };
           }
 
-          // no grouping: one pack for all items
           if (!groupByCluster) {
-            const { placed, rows } = packRows(items);
-            const totalRows = rows;
-            return {
-              totalRows,
-              clusters: [
-                { name: "__all__", rows, placed: placed.map(p => ({ ...p, clusterYOffset: 0 })) }
-              ]
-            };
+            const { placed, rows } = packRows(displayItems);
+            return { totalRows: rows, clusters: [{ name: "__all__", rows, yOffsetPx: 0, placed }] };
           }
 
-          // grouping: pack per cluster, then stack clusters
           const clustersMap = new Map();
-          items.forEach((it) => {
+          displayItems.forEach((it) => {
             const key = it.cluster || "Ungrouped";
             if (!clustersMap.has(key)) clustersMap.set(key, []);
             clustersMap.get(key).push(it);
           });
 
-          // stable cluster order: creation order first, then any stragglers
           const orderedClusters = [
             ...clusterOrder.filter(c => clustersMap.has(c)),
             ...[...clustersMap.keys()].filter(c => !clusterOrder.includes(c)).sort()
@@ -249,52 +241,50 @@
 
           let yOffsetRows = 0;
           const clusterLayouts = [];
+
           orderedClusters.forEach((cname, idx) => {
             const { placed, rows } = packRows(clustersMap.get(cname));
-            const clusterYOffsetPx = yOffsetRows * rowGapY + (idx === 0 ? 0 : clusterGapY);
+            const gap = (idx === 0) ? 0 : clusterGapY;
+            const yOffsetPx = yOffsetRows * rowGapY + gap;
+
             clusterLayouts.push({
               name: cname,
               rows,
-              yOffsetPx: clusterYOffsetPx,
-              placed: placed.map(p => ({ ...p, clusterYOffsetPx }))
+              yOffsetPx,
+              placed: placed.map(p => ({ ...p, clusterYOffsetPx: yOffsetPx }))
             });
-            // next cluster starts after this cluster's rows (plus gap handled above)
+
             yOffsetRows += rows;
           });
 
-          const totalRows = yOffsetRows;
-          return { totalRows, clusters: clusterLayouts };
-        }, [
-          items, groupByCluster, clusterOrder, innerWidth,
-          leftPad, boxGapX, rowGapY, clusterGapY
-        ]);
+          return { totalRows: yOffsetRows, clusters: clusterLayouts };
+        }, [displayItems, groupByCluster, clusterOrder, leftPad, innerWidth]);
 
-        // Dynamic height: expand from bottom to fit all cluster rows
         const height = useMemo(() => {
+          if (!displayItems.length) return baseHeight;
+
           const required =
-            topPad +
-            topRowGap +
+            topPad + topRowGap +
             (layout.totalRows * rowGapY) +
-            boxH +
-            bottomPad +
-            // extra bottom breathing room if lots of clusters
-            (groupByCluster ? 10 : 0);
+            boxH + bottomPad + (groupByCluster ? 10 : 0);
 
           return Math.max(baseHeight, required);
-        }, [layout.totalRows, groupByCluster]);
+        }, [displayItems.length, layout.totalRows, groupByCluster]);
 
         const innerHeight = height - topPad - bottomPad;
 
         const pathD = useMemo(() => {
           const steps = 300;
           let maxY = 0;
-          const xs = [], ys = [];
+          const xs = [];
+          const ys = [];
           for (let i = 0; i <= steps; i++) {
             const x = xMin + (i * (xMax - xMin)) / steps;
             const y = gaussian(x, mean, axisSd);
             xs.push(x); ys.push(y);
             if (y > maxY) maxY = y;
           }
+
           const scaleY = (y) => topPad + innerHeight - (y / maxY) * innerHeight;
 
           let d = "";
@@ -305,16 +295,15 @@
           }
           d += ` L ${xScale(xMax)} ${topPad + innerHeight} L ${xScale(xMin)} ${topPad + innerHeight} Z`;
           return d;
-        }, [axisSd, innerHeight]);
+        }, [axisSd, innerHeight, leftPad, innerWidth]);
 
-        // Show cluster name labels on the left when grouping
         function renderClusterLabels() {
           if (!groupByCluster) return null;
-          return layout.clusters.map((c, idx) => (
+          return layout.clusters.map((c) => (
             <text
               key={c.name}
-              x={leftPad - 10}
-              y={topPad + 16 + c.yOffsetPx + 12}
+              x={leftPad - 18}
+              y={topPad + topRowGap + c.yOffsetPx + 12}
               textAnchor="end"
               className="fill-slate-500 text-[11px]"
             >
@@ -335,28 +324,20 @@
                   <div className="flex items-center justify-between mb-3">
                     <span className="font-medium">Axis standard deviation</span>
                     <div className="flex items-center gap-2">
-                      <button
+                      <button type="button"
                         className={`px-3 py-1 rounded-full border ${axisSd===15?"bg-slate-900 text-white":"bg-white"}`}
-                        onClick={()=>setAxisSd(15)}
-                        type="button"
-                      >
-                        15
-                      </button>
-                      <button
+                        onClick={() => setAxisSd(15)}
+                      >15</button>
+                      <button type="button"
                         className={`px-3 py-1 rounded-full border ${axisSd===10?"bg-slate-900 text-white":"bg-white"}`}
-                        onClick={()=>setAxisSd(10)}
-                        type="button"
-                      >
-                        10
-                      </button>
+                        onClick={() => setAxisSd(10)}
+                      >10</button>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between mt-4">
                     <label className="text-sm">Curve Color</label>
-                    <input
-                      type="color"
-                      value={curveColor}
+                    <input type="color" value={curveColor}
                       onChange={(e)=>setCurveColor(e.target.value)}
                       className="w-10 h-8 rounded-md border cursor-pointer"
                     />
@@ -391,17 +372,17 @@
                   <div className="grid md:grid-cols-6 gap-3 items-end">
                     <div className="md:col-span-2">
                       <label className="text-sm">Subtest / Composite name</label>
-                      <input className="mt-1 w-full px-3 py-2 rounded-xl border" value={name} onChange={(e)=>setName(e.target.value)} required />
+                      <input className="mt-1 w-full px-3 py-2 rounded-xl border"
+                        value={name} onChange={(e)=>setName(e.target.value)} required
+                      />
                     </div>
 
                     <div className="md:col-span-2">
                       <label className="text-sm">Cluster (e.g., WISC-V, Language)</label>
-                      <input className="mt-1 w-full px-3 py-2 rounded-xl border" value={cluster} onChange={(e)=>setCluster(e.target.value)} placeholder="Ungrouped if blank" />
-                      {clusterOrder.length > 0 && (
-                        <div className="text-xs text-slate-500 mt-1">
-                          Existing: {clusterOrder.slice(0,6).join(", ")}{clusterOrder.length>6 ? "…" : ""}
-                        </div>
-                      )}
+                      <input className="mt-1 w-full px-3 py-2 rounded-xl border"
+                        value={cluster} onChange={(e)=>setCluster(e.target.value)}
+                        placeholder="Ungrouped if blank"
+                      />
                     </div>
 
                     <div>
@@ -416,19 +397,21 @@
 
                     <div>
                       <label className="text-sm">Value</label>
-                      <input type="number" step="any" className="mt-1 w-full px-3 py-2 rounded-xl border" value={value} onChange={(e)=>setValue(e.target.value)} required />
+                      <input type="number" step="any"
+                        className="mt-1 w-full px-3 py-2 rounded-xl border"
+                        value={value} onChange={(e)=>setValue(e.target.value)} required
+                      />
                     </div>
 
                     <div>
                       <label className="text-sm">Marker Color</label>
-                      <select className="mt-1 w-full px-3 py-2 rounded-xl border" value={markerPreset} onChange={(e)=>setMarkerPreset(e.target.value)}>
+                      <select className="mt-1 w-full px-3 py-2 rounded-xl border"
+                        value={markerPreset} onChange={(e)=>setMarkerPreset(e.target.value)}
+                      >
                         {MARKER_COLOR_PRESETS.map(opt => (
                           <option key={opt.label} value={opt.value}>{opt.label}</option>
                         ))}
                       </select>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Tip: leave on <span className="font-medium">Auto</span> to use the cluster’s default color.
-                      </div>
                     </div>
 
                     <div className="md:col-span-6 flex justify-end">
@@ -437,18 +420,6 @@
                       </button>
                     </div>
                   </div>
-
-                  {items.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {items.map(it => (
-                        <span key={it.id} className="px-3 py-1 rounded-full bg-slate-100 border text-sm flex items-center gap-2">
-                          <span className="inline-block w-3 h-3 rounded-full" style={{background: it.color}} />
-                          {it.name} — {it.inputValue} {it.inputType} ({it.cluster || "Ungrouped"})
-                          <button onClick={() => removeItem(it.id)} className="ml-1 text-slate-500 hover:text-red-600" title="Remove" type="button">×</button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </form>
               </div>
 
@@ -476,20 +447,18 @@
 
                     {layout.clusters.flatMap((c) =>
                       c.placed.map((it) => {
-                        const label = it.name;
                         const val = Math.round(it.std100);
                         const cat = bandFor(it.std100);
-                        const fill = it.color;
 
-                        const boxW = it.boxW ?? Math.max(84, String(label).length * 6 + 24);
+                        const boxW = it.boxW;
                         const aX = it.x;
                         const aY = topPad + topRowGap + (it.row * rowGapY) + (it.clusterYOffsetPx || 0);
 
                         return (
                           <g key={it.id}>
-                            <rect x={aX} y={aY} width={boxW} height={boxH} rx={10} ry={10} fill={fill} />
+                            <rect x={aX} y={aY} width={boxW} height={boxH} rx={10} ry={10} fill={it.color} />
                             <text x={aX + boxW/2} y={aY + 15} textAnchor="middle" className="fill-white text-[12px] font-medium">
-                              {label}
+                              {it.name}
                             </text>
                             <text x={aX + boxW/2} y={aY + 28} textAnchor="middle" className="fill-white text-[11px]">
                               {showNumeric ? `${val} • ${cat}` : `${cat}`}
@@ -501,11 +470,12 @@
                   </svg>
                 </div>
 
-                {items.length > 0 && (
+                {displayItems.length > 0 && (
                   <div className="mt-8 bg-white rounded-2xl shadow-sm border p-4" id="scoreTable">
                     <div className="flex justify-between items-center mb-3">
                       <h2 className="text-lg font-semibold">Entered Scores</h2>
-                      <button onClick={()=>window.print()} className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 no-print">
+                      <button type="button" onClick={()=>window.print()}
+                        className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 no-print">
                         Print / Save as PDF
                       </button>
                     </div>
@@ -524,7 +494,7 @@
                         </tr>
                       </thead>
                       <tbody>
-                        {items.map(it => (
+                        {displayItems.map(it => (
                           <tr key={it.id}>
                             <td className="border p-2">{it.cluster || "Ungrouped"}</td>
                             <td className="border p-2">{it.name}</td>
@@ -532,11 +502,10 @@
                             <td className="border p-2">{it.inputValue}</td>
                             <td className="border p-2">{Math.round(it.std100)}</td>
                             <td className="border p-2">{bandFor(it.std100)}</td>
+                            <td className="border p-2"><span className="inline-block w-5 h-5 rounded-md border" style={{background: it.color}}></span></td>
                             <td className="border p-2">
-                              <span className="inline-block w-5 h-5 rounded-md border" style={{background: it.color}}></span>
-                            </td>
-                            <td className="border p-2">
-                              <button onClick={()=>removeItem(it.id)} className="px-2 py-1 rounded-md border hover:bg-red-50 hover:text-red-700" type="button">
+                              <button type="button" onClick={()=>removeItem(it.id)}
+                                className="px-2 py-1 rounded-md border hover:bg-red-50 hover:text-red-700">
                                 Remove
                               </button>
                             </td>
