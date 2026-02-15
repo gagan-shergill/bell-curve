@@ -119,16 +119,6 @@
           return b ? b.label : "";
         }
 
-        // ✅ Overlap fix for top labels
-        function labelVisibility(idx) {
-          // always show Average (index 3)
-          if (idx === 3) return true;
-          // narrow bands at SD=10: show every other label
-          if (axisSd === 10) return idx % 2 === 0;
-          // SD=15: show all
-          return true;
-        }
-
         // Shift curve right / prevent left labels clipping
         const width = 1000;
         const leftPad = 150;
@@ -502,19 +492,23 @@
                       const X = xScale(x1);
                       const W = xScale(x2) - xScale(x1);
 
+                      // ✅ stagger labels into two rows when SD=10 to avoid overlap (and keep all labels)
+                      const labelY =
+                        axisSd === 10
+                          ? (idx % 2 === 0 ? topPad - 18 : topPad - 6)
+                          : topPad - 6;
+
                       return (
                         <g key={idx}>
                           <rect x={X} y={topPad} width={W} height={innerHeight} fill={b.tint} opacity={0.35} />
-                          {labelVisibility(idx) && (
-                            <text
-                              x={X + W/2}
-                              y={topPad - 6}
-                              textAnchor="middle"
-                              className={`fill-slate-600 ${axisSd === 10 ? "text-[10px]" : "text-[12px]"}`}
-                            >
-                              {b.label}
-                            </text>
-                          )}
+                          <text
+                            x={X + W/2}
+                            y={labelY}
+                            textAnchor="middle"
+                            className={`fill-slate-600 ${axisSd === 10 ? "text-[10px]" : "text-[12px]"}`}
+                          >
+                            {b.label}
+                          </text>
                         </g>
                       );
                     })}
