@@ -492,19 +492,20 @@
                       const X = xScale(x1);
                       const W = xScale(x2) - xScale(x1);
 
-                      // ✅ stagger labels into two rows when SD=10 to avoid overlap (and keep all labels)
-                      const labelY =
-                        axisSd === 10
-                          ? (idx % 2 === 0 ? topPad - 18 : topPad - 6)
-                          : topPad - 6;
+                      const cx = X + W / 2;
+                      const cy = topPad - 6;
+
+                      // ✅ One line always; for SD=10 we rotate slightly + shrink font to avoid overlap
+                      const rotateDeg = axisSd === 10 ? -18 : 0;
 
                       return (
                         <g key={idx}>
                           <rect x={X} y={topPad} width={W} height={innerHeight} fill={b.tint} opacity={0.35} />
                           <text
-                            x={X + W/2}
-                            y={labelY}
+                            x={cx}
+                            y={cy}
                             textAnchor="middle"
+                            transform={rotateDeg ? `rotate(${rotateDeg} ${cx} ${cy})` : undefined}
                             className={`fill-slate-600 ${axisSd === 10 ? "text-[10px]" : "text-[12px]"}`}
                           >
                             {b.label}
