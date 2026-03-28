@@ -506,10 +506,10 @@ function App(){
                   <tbody>
                     {rows.map((it,i)=>(
                       <tr key={it.id} style={{borderBottom:'1px solid #f4f1ec',background:i%2===1?'#faf9f7':'white'}}>
-                        <td style={{padding:'9px 16px',fontWeight:500,fontSize:15,fontFamily:"'EB Garamond',serif",color:'#111'}}>{it.name}</td>
-                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:11,color:'#555'}}>{SFULL[it.type]}</td>
+                        <td style={{padding:'9px 16px',fontWeight:500,fontSize:13,fontFamily:"'EB Garamond',serif",color:'#111'}}>{it.name}</td>
+                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:13,color:'#555'}}>{SFULL[it.type]}</td>
                         <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:13,color:'#333',fontWeight:500}}>{it.iv}</td>
-                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:16,color:'#111'}}>{Math.round(it.std100)}</td>
+                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:13,color:'#111'}}>{Math.round(it.std100)}</td>
                         <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:13,color:'#333'}}>{it.pr}</td>
                         <td style={{padding:'9px 16px'}}>
                           <span style={{display:'inline-block',padding:'3px 11px',borderRadius:5,background:it.band.f,color:'#111',fontSize:13,fontWeight:600,border:`1px solid ${it.band.lc}22`}}>{it.band.label}</span>
