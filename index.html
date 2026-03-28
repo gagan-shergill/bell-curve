@@ -1,609 +1,533 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Interactive Normal Distribution</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <style>
-      body { font-family: Georgia, "Times New Roman", Times, serif; }
-
-      @page { size: landscape; margin: 0.5in; }
-
-      @media print {
-        body * { visibility: hidden; }
-        .print-keep, .print-keep * { visibility: visible; }
-        .print-keep { position: static; width: 100%; margin: 0; padding: 0; }
-        .print-keep .rounded-2xl { overflow: visible !important; box-shadow: none !important; border-color: #ccc !important; }
-        svg { width: 100%; height: auto; }
-        table { page-break-before: avoid; width: 100%; border-collapse: collapse; font-size: 10pt; }
-        th, td { border: 1px solid #ccc; padding: 4px; }
-        .no-print, .print-hide { display: none !important; }
-      }
-    </style>
-  </head>
-
-  <body class="bg-white">
-    <div id="root"></div>
-
-    <script type="text/babel">
-      const { useMemo, useState } = React;
-
-      function gaussian(x, mean, sd) {
-        const coef = 1 / (sd * Math.sqrt(2 * Math.PI));
-        const exp = Math.exp(-0.5 * Math.pow((x - mean) / sd, 2));
-        return coef * exp;
-      }
-
-      function toStd100(value, type, axisSd) {
-        if (type === "standard") return value;
-        if (type === "z") return 100 + value * axisSd;
-        if (type === "t") return 100 + ((value - 50) / 10) * axisSd;
-        if (type === "scaled") return 100 + ((value - 10) / 3) * axisSd;
-        return value;
-      }
-
-      const BAND_LABELS = {
-        en: ["Very Low","Low","Below Avg","Average","High Avg","Very High","Superior"],
-        es: ["Muy Bajo","Bajo","Promedio Bajo","Promedio","Promedio Alto","Superior","Muy Superior"],
-        yue: ["非常低","低","低平均水平","平均","高平均水平","高","非常高"],
-      };
-
-      const BAND_TINTS = ["#fecaca","#fed7aa","#fde68a","#bbf7d0","#bae6fd","#c7d2fe","#ddd6fe"];
-
-      // z-cutpoints matching original 15-SD boundaries (69/79/89/109/119/129)
-      const Z_CUTS = [-2, -1.3333333333, -0.6666666667, 0.6666666667, 1.3333333333, 2];
-
-      const CLUSTER_PALETTE = [
-        "#0ea5ff", "#6366f1", "#8b5cf6", "#14b8a6", "#22c55e",
-        "#f59e0b", "#f97316", "#f43f5e", "#334155"
-      ];
-
-      const MARKER_COLOR_PRESETS = [
-        { label: "Auto (cluster color)", value: "" },
-        { label: "Blue", value: "#0ea5ff" },
-        { label: "Indigo", value: "#6366f1" },
-        { label: "Violet", value: "#8b5cf6" },
-        { label: "Teal", value: "#14b8a6" },
-        { label: "Green", value: "#22c55e" },
-        { label: "Amber", value: "#f59e0b" },
-        { label: "Orange", value: "#f97316" },
-        { label: "Rose", value: "#f43f5e" },
-        { label: "Slate", value: "#334155" },
-      ];
-
-      function BellCurveDashboard() {
-        const mean = 100;
-
-        const [axisSd, setAxisSd] = useState(15);
-        const [curveColor, setCurveColor] = useState("#bfe0ff99");
-
-        const [name, setName] = useState("");
-        const [cluster, setCluster] = useState("");
-        const [type, setType] = useState("standard");
-        const [value, setValue] = useState("");
-
-        const [items, setItems] = useState([]);
-        const [showBands, setShowBands] = useState(false);
-        const [showNumeric, setShowNumeric] = useState(true);
-        const [lang, setLang] = useState("en");
-
-        const [groupByCluster, setGroupByCluster] = useState(true);
-        const [markerPreset, setMarkerPreset] = useState(""); // persists until changed
-
-        const [clusterColors, setClusterColors] = useState({});
-        const [clusterOrder, setClusterOrder] = useState([]);
-
-        // SD-dependent bands (so categories change when SD toggles)
-        const RANGE_BANDS = useMemo(() => {
-          const labels = BAND_LABELS[lang] || BAND_LABELS.en;
-          const cuts = Z_CUTS.map(z => mean + z * axisSd);
-          return [
-            { min: -Infinity, max: cuts[0], label: labels[0], tint: BAND_TINTS[0] },
-            { min: cuts[0], max: cuts[1], label: labels[1], tint: BAND_TINTS[1] },
-            { min: cuts[1], max: cuts[2], label: labels[2], tint: BAND_TINTS[2] },
-            { min: cuts[2], max: cuts[3], label: labels[3], tint: BAND_TINTS[3] },
-            { min: cuts[3], max: cuts[4], label: labels[4], tint: BAND_TINTS[4] },
-            { min: cuts[4], max: cuts[5], label: labels[5], tint: BAND_TINTS[5] },
-            { min: cuts[5], max: Infinity, label: labels[6], tint: BAND_TINTS[6] },
-          ];
-        }, [lang, axisSd]);
-
-        function bandFor(std100) {
-          const b = RANGE_BANDS.find(bb => std100 >= bb.min && std100 <= bb.max);
-          return b ? b.label : "";
-        }
-
-        // Shift curve right / prevent left labels clipping
-        const width = 1000;
-        const leftPad = 150;
-        const rightPad = 40;
-        const innerWidth = width - leftPad - rightPad;
-
-        const xMin = 40;
-        const xMax = 160;
-
-        const rowGapY = 38;
-        const boxH = 36;
-        const boxGapX = 8;
-        const clusterGapY = 22;
-
-        const topPad = 24;
-        const bottomPad = 70;
-        const baseHeight = 400;
-        const topRowGap = 16;
-
-        const xScale = (x) => leftPad + ((x - xMin) / (xMax - xMin)) * innerWidth;
-
-        function ensureClusterColor(clusterName) {
-          const clean = (clusterName || "").trim();
-          const key = clean || "Ungrouped";
-          if (clusterColors[key]) return { key, color: clusterColors[key] };
-
-          const nextIdx = clusterOrder.length % CLUSTER_PALETTE.length;
-          const nextColor = CLUSTER_PALETTE[nextIdx];
-
-          setClusterColors(prev => ({ ...prev, [key]: nextColor }));
-          setClusterOrder(prev => (prev.includes(key) ? prev : [...prev, key]));
-
-          return { key, color: nextColor };
-        }
-
-        // recompute std100 live based on current axisSd
-        const displayItems = useMemo(() => {
-          return items.map(it => ({
-            ...it,
-            std100: toStd100(it.inputValue, it.inputType, axisSd)
-          }));
-        }, [items, axisSd]);
-
-        function addItem(e) {
-          e.preventDefault();
-          const num = Number(value);
-          if (!isFinite(num)) return;
-
-          const { key, color } = ensureClusterColor(cluster);
-          const finalColor = markerPreset ? markerPreset : color;
-
-          setItems(prev => ([
-            ...prev,
-            {
-              id: Math.random().toString(36).slice(2),
-              name: name.trim() || "(Unnamed)",
-              cluster: key,
-              inputType: type,
-              inputValue: num,
-              color: finalColor,
-            }
-          ]));
-
-          setName("");
-          setValue("");
-        }
-
-        function removeItem(id) {
-          setItems(prev => prev.filter(i => i.id !== id));
-        }
-
-        // Marker packing (keeps clusters separate vertically)
-        const layout = useMemo(() => {
-          const getBoxW = (label) => Math.max(84, String(label).length * 6 + 24);
-
-          function packRows(clusterItems) {
-            const sorted = [...clusterItems].sort((a,b) => a.std100 - b.std100);
-            const rowsRight = [];
-            const placed = [];
-
-            sorted.forEach((it) => {
-              const x = xScale(it.std100);
-              const boxW = getBoxW(it.name);
-              const proposedX = Math.max(
-                leftPad + 4,
-                Math.min(x - boxW / 2, leftPad + innerWidth - boxW - 4)
-              );
-
-              let row = 0;
-              while (true) {
-                const rightEdge = rowsRight[row] ?? (leftPad - boxGapX);
-                if (proposedX >= rightEdge + boxGapX) {
-                  rowsRight[row] = proposedX + boxW;
-                  placed.push({ ...it, boxW, x: proposedX, row });
-                  break;
-                }
-                row += 1;
-              }
-            });
-
-            return { placed, rows: Math.max(1, rowsRight.length) };
-          }
-
-          if (!groupByCluster) {
-            const { placed, rows } = packRows(displayItems);
-            return { totalRows: rows, clusters: [{ name: "__all__", rows, yOffsetPx: 0, placed }] };
-          }
-
-          const clustersMap = new Map();
-          displayItems.forEach((it) => {
-            const key = it.cluster || "Ungrouped";
-            if (!clustersMap.has(key)) clustersMap.set(key, []);
-            clustersMap.get(key).push(it);
-          });
-
-          const orderedClusters = [
-            ...clusterOrder.filter(c => clustersMap.has(c)),
-            ...[...clustersMap.keys()].filter(c => !clusterOrder.includes(c)).sort()
-          ];
-
-          let yOffsetRows = 0;
-          const clusterLayouts = [];
-
-          orderedClusters.forEach((cname, idx) => {
-            const { placed, rows } = packRows(clustersMap.get(cname));
-            const gap = (idx === 0) ? 0 : clusterGapY;
-            const yOffsetPx = yOffsetRows * rowGapY + gap;
-
-            clusterLayouts.push({
-              name: cname,
-              rows,
-              yOffsetPx,
-              placed: placed.map(p => ({ ...p, clusterYOffsetPx: yOffsetPx }))
-            });
-
-            yOffsetRows += rows;
-          });
-
-          return { totalRows: yOffsetRows, clusters: clusterLayouts };
-        }, [displayItems, groupByCluster, clusterOrder, leftPad, innerWidth]);
-
-        const height = useMemo(() => {
-          if (!displayItems.length) return baseHeight;
-
-          const required =
-            topPad + topRowGap +
-            (layout.totalRows * rowGapY) +
-            boxH + bottomPad + (groupByCluster ? 10 : 0);
-
-          return Math.max(baseHeight, required);
-        }, [displayItems.length, layout.totalRows, groupByCluster]);
-
-        const innerHeight = height - topPad - bottomPad;
-
-        const pathD = useMemo(() => {
-          const steps = 300;
-          let maxY = 0;
-          const xs = [];
-          const ys = [];
-          for (let i = 0; i <= steps; i++) {
-            const x = xMin + (i * (xMax - xMin)) / steps;
-            const y = gaussian(x, mean, axisSd);
-            xs.push(x); ys.push(y);
-            if (y > maxY) maxY = y;
-          }
-
-          const scaleY = (y) => topPad + innerHeight - (y / maxY) * innerHeight;
-
-          let d = "";
-          for (let i = 0; i <= steps; i++) {
-            const X = xScale(xs[i]);
-            const Y = scaleY(ys[i]);
-            d += i === 0 ? `M ${X} ${Y}` : ` L ${X} ${Y}`;
-          }
-          d += ` L ${xScale(xMax)} ${topPad + innerHeight} L ${xScale(xMin)} ${topPad + innerHeight} Z`;
-          return d;
-        }, [axisSd, innerHeight, leftPad, innerWidth]);
-
-        function renderClusterLabels() {
-          if (!groupByCluster) return null;
-          return layout.clusters.map((c) => (
-            <text
-              key={c.name}
-              x={leftPad - 18}
-              y={topPad + topRowGap + c.yOffsetPx + 12}
-              textAnchor="end"
-              className="fill-slate-500 text-[11px]"
-            >
-              {c.name}
-            </text>
-          ));
-        }
-
-        return (
-          <div className="w-full min-h-screen bg-white text-slate-800 p-6">
-            <div className="max-w-[1200px] mx-auto">
-              <h1 className="text-2xl md:text-3xl font-semibold mb-2 print-hide">
-                Interactive Normal Distribution
-              </h1>
-
-              <div className="grid lg:grid-cols-3 gap-4 mb-6 print-hide">
-                <div className="p-4 rounded-2xl bg-white shadow-sm border">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-medium">Axis standard deviation</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className={`px-3 py-1 rounded-full border ${axisSd===15?"bg-slate-900 text-white":"bg-white"}`}
-                        onClick={() => setAxisSd(15)}
-                      >15</button>
-                      <button
-                        type="button"
-                        className={`px-3 py-1 rounded-full border ${axisSd===10?"bg-slate-900 text-white":"bg-white"}`}
-                        onClick={() => setAxisSd(10)}
-                      >10</button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-4">
-                    <label className="text-sm">Curve Color</label>
-                    <input
-                      type="color"
-                      value={curveColor}
-                      onChange={(e)=>setCurveColor(e.target.value)}
-                      className="w-10 h-8 rounded-md border cursor-pointer"
-                    />
-                  </div>
-
-                  <label className="mt-3 flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={showBands}
-                      onChange={(e)=>setShowBands(e.target.checked)}
-                    />
-                    Show background bands
-                  </label>
-
-                  <label className="mt-2 flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={showNumeric}
-                      onChange={(e)=>setShowNumeric(e.target.checked)}
-                    />
-                    Show numeric scores on markers
-                  </label>
-
-                  <label className="mt-2 flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={groupByCluster}
-                      onChange={(e)=>setGroupByCluster(e.target.checked)}
-                    />
-                    Group markers by cluster
-                  </label>
-
-                  <div className="mt-3">
-                    <label className="text-sm block mb-1">Band language</label>
-                    <select
-                      className="w-full px-3 py-2 rounded-xl border"
-                      value={lang}
-                      onChange={(e)=>setLang(e.target.value)}
-                    >
-                      <option value="en">English</option>
-                      <option value="es">Español</option>
-                      <option value="yue">粵語 (Cantonese)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <form onSubmit={addItem} className="p-4 rounded-2xl bg-white shadow-sm border lg:col-span-2">
-                  <div className="grid md:grid-cols-6 gap-3 items-end">
-                    <div className="md:col-span-2">
-                      <label className="text-sm">Subtest / Composite name</label>
-                      <input
-                        className="mt-1 w-full px-3 py-2 rounded-xl border"
-                        value={name}
-                        onChange={(e)=>setName(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="text-sm">Cluster (e.g., WISC-V, Language)</label>
-                      <input
-                        className="mt-1 w-full px-3 py-2 rounded-xl border"
-                        value={cluster}
-                        onChange={(e)=>setCluster(e.target.value)}
-                        placeholder="Ungrouped if blank"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm">Score type</label>
-                      <select
-                        className="mt-1 w-full px-3 py-2 rounded-xl border"
-                        value={type}
-                        onChange={(e)=>setType(e.target.value)}
-                      >
-                        <option value="standard">Standard (mean 100)</option>
-                        <option value="t">T (mean 50, SD 10)</option>
-                        <option value="scaled">Scaled (mean 10, SD 3)</option>
-                        <option value="z">SD units (z)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="text-sm">Value</label>
-                      <input
-                        type="number"
-                        step="any"
-                        className="mt-1 w-full px-3 py-2 rounded-xl border"
-                        value={value}
-                        onChange={(e)=>setValue(e.target.value)}
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm">Marker Color</label>
-                      <select
-                        className="mt-1 w-full px-3 py-2 rounded-xl border"
-                        value={markerPreset}
-                        onChange={(e)=>setMarkerPreset(e.target.value)}
-                      >
-                        {MARKER_COLOR_PRESETS.map(opt => (
-                          <option key={opt.label} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </select>
-                      <div className="text-xs text-slate-500 mt-1">
-                        Leave on <span className="font-medium">Auto</span> to use the cluster’s default color.
-                      </div>
-                    </div>
-
-                    <div className="md:col-span-6 flex justify-end">
-                      <button type="submit" className="h-[42px] px-4 rounded-xl bg-slate-900 text-white hover:bg-slate-800">
-                        Add
-                      </button>
-                    </div>
-                  </div>
-
-                  {displayItems.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {displayItems.map(it => (
-                        <span
-                          key={it.id}
-                          className="px-3 py-1 rounded-full bg-slate-100 border text-sm flex items-center gap-2"
-                        >
-                          <span className="inline-block w-3 h-3 rounded-full" style={{background: it.color}} />
-                          {it.name} — {it.inputValue} {it.inputType} ({it.cluster || "Ungrouped"})
-                          <button
-                            type="button"
-                            onClick={() => removeItem(it.id)}
-                            className="ml-1 text-slate-500 hover:text-red-600"
-                            title="Remove"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </form>
-              </div>
-
-              <div className="print-keep">
-                <div className="rounded-2xl bg-white shadow-sm border overflow-hidden">
-                  <svg width={width} height={height} className="w-full">
-                    {showBands && RANGE_BANDS.map((b, idx) => {
-                      const x1 = Math.max(xMin, Number.isFinite(b.min) ? b.min : xMin);
-                      const x2 = Math.min(xMax, Number.isFinite(b.max) ? b.max : xMax);
-                      const X = xScale(x1);
-                      const W = xScale(x2) - xScale(x1);
-
-                      const cx = X + W / 2;
-                      const cy = topPad - 6;
-
-                      // ✅ One line always; for SD=10 we rotate slightly + shrink font to avoid overlap
-                      const rotateDeg = axisSd === 10 ? -18 : 0;
-
-                      return (
-                        <g key={idx}>
-                          <rect x={X} y={topPad} width={W} height={innerHeight} fill={b.tint} opacity={0.35} />
-                          <text
-                            x={cx}
-                            y={cy}
-                            textAnchor="middle"
-                            transform={rotateDeg ? `rotate(${rotateDeg} ${cx} ${cy})` : undefined}
-                            className={`fill-slate-600 ${axisSd === 10 ? "text-[10px]" : "text-[12px]"}`}
-                          >
-                            {b.label}
-                          </text>
-                        </g>
-                      );
-                    })}
-
-                    <path d={pathD} fill={curveColor} stroke="#0f172a22" strokeWidth={1} />
-
-                    {renderClusterLabels()}
-
-                    {layout.clusters.flatMap((c) =>
-                      c.placed.map((it) => {
-                        const val = Math.round(it.std100);
-                        const cat = bandFor(it.std100);
-
-                        const boxW = it.boxW;
-                        const aX = it.x;
-                        const aY = topPad + topRowGap + (it.row * rowGapY) + (it.clusterYOffsetPx || 0);
-
-                        return (
-                          <g key={it.id}>
-                            <rect x={aX} y={aY} width={boxW} height={boxH} rx={10} ry={10} fill={it.color} />
-                            <text x={aX + boxW/2} y={aY + 15} textAnchor="middle" className="fill-white text-[12px] font-medium">
-                              {it.name}
-                            </text>
-                            <text x={aX + boxW/2} y={aY + 28} textAnchor="middle" className="fill-white text-[11px]">
-                              {showNumeric ? `${val} • ${cat}` : `${cat}`}
-                            </text>
-                          </g>
-                        );
-                      })
-                    )}
-                  </svg>
-                </div>
-
-                {displayItems.length > 0 && (
-                  <div className="mt-8 bg-white rounded-2xl shadow-sm border p-4" id="scoreTable">
-                    <div className="flex justify-between items-center mb-3">
-                      <h2 className="text-lg font-semibold">Entered Scores</h2>
-                      <button
-                        type="button"
-                        onClick={()=>window.print()}
-                        className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 no-print"
-                      >
-                        Print / Save as PDF
-                      </button>
-                    </div>
-
-                    <table className="min-w-full border border-slate-200 text-sm">
-                      <thead className="bg-slate-100">
-                        <tr>
-                          <th className="border p-2 text-left">Cluster</th>
-                          <th className="border p-2 text-left">Subtest / Composite</th>
-                          <th className="border p-2 text-left">Score Type</th>
-                          <th className="border p-2 text-left">Input Value</th>
-                          <th className="border p-2 text-left">Converted (Std-100)</th>
-                          <th className="border p-2 text-left">Category</th>
-                          <th className="border p-2 text-left">Color</th>
-                          <th className="border p-2 text-left">Remove</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayItems.map(it => (
-                          <tr key={it.id}>
-                            <td className="border p-2">{it.cluster || "Ungrouped"}</td>
-                            <td className="border p-2">{it.name}</td>
-                            <td className="border p-2">{it.inputType}</td>
-                            <td className="border p-2">{it.inputValue}</td>
-                            <td className="border p-2">{Math.round(it.std100)}</td>
-                            <td className="border p-2">{bandFor(it.std100)}</td>
-                            <td className="border p-2">
-                              <span className="inline-block w-5 h-5 rounded-md border" style={{background: it.color}}></span>
-                            </td>
-                            <td className="border p-2">
-                              <button
-                                type="button"
-                                onClick={()=>removeItem(it.id)}
-                                className="px-2 py-1 rounded-md border hover:bg-red-50 hover:text-red-700"
-                              >
-                                Remove
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-            </div>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Curve it.</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'EB Garamond',Georgia,serif;background:#f0ede8;color:#111;min-height:100vh;font-size:15px}
+    input,select{font-family:'EB Garamond',Georgia,serif;font-size:15px;color:#111;background:white;border:1.5px solid #d6d0c8;border-radius:7px;padding:7px 11px;width:100%;outline:none;transition:border-color .15s,box-shadow .15s}
+    input:focus,select:focus{border-color:#555;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
+    input::placeholder{color:#b0acaa;font-style:italic}
+    button{font-family:'EB Garamond',Georgia,serif;cursor:pointer}
+    @media print{.no-print{display:none!important}body{background:white;font-size:12px}.print-section{break-inside:avoid}}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+'use strict';
+const{useState,useMemo}=React;
+
+/* ── shared dims ── */
+const MEAN=100,XMIN=40,XMAX=160;
+const SVG_W=1100,MR=24,MT=12,MB=86;
+
+/* ── curve-mode dims ── */
+const ML=44, IW=SVG_W-ML-MR;
+const BASE_CURVE_H=260, ABOVE_H=18;
+const BOX_H=22, BOX_GAP=2, STACK_STEP=BOX_H+BOX_GAP;
+
+/* ── profile-mode dims ── */
+const PML=110;                      // wider left margin for name labels
+const PIW=SVG_W-PML-MR;
+const PROFILE_CURVE_H=160;          // shorter curve in profile mode
+const ROW_H=34;                     // height per score row
+const ROW_SEP=6;                    // gap between curve and rows
+
+/* ── themes ── */
+const TH={
+  Blue:  {sw:'#1d4ed8',st:'#1d4ed8',g0:'#1d4ed8',g1:'#3b82f6',b:[{f:'#1e3a8a',o:.22,lc:'#1e3a8a'},{f:'#1d4ed8',o:.15,lc:'#1d4ed8'},{f:'#3b82f6',o:.09,lc:'#2563eb'},{f:'#bfdbfe',o:.28,lc:'#1e40af'},{f:'#3b82f6',o:.09,lc:'#2563eb'},{f:'#1d4ed8',o:.15,lc:'#1d4ed8'},{f:'#1e3a8a',o:.22,lc:'#1e3a8a'}]},
+  Red:   {sw:'#dc2626',st:'#dc2626',g0:'#dc2626',g1:'#f87171',b:[{f:'#7f1d1d',o:.22,lc:'#7f1d1d'},{f:'#dc2626',o:.15,lc:'#dc2626'},{f:'#f87171',o:.09,lc:'#ef4444'},{f:'#fee2e2',o:.30,lc:'#b91c1c'},{f:'#f87171',o:.09,lc:'#ef4444'},{f:'#dc2626',o:.15,lc:'#dc2626'},{f:'#7f1d1d',o:.22,lc:'#7f1d1d'}]},
+  Green: {sw:'#16a34a',st:'#16a34a',g0:'#16a34a',g1:'#4ade80',b:[{f:'#14532d',o:.22,lc:'#14532d'},{f:'#16a34a',o:.15,lc:'#16a34a'},{f:'#4ade80',o:.09,lc:'#15803d'},{f:'#bbf7d0',o:.28,lc:'#166534'},{f:'#4ade80',o:.09,lc:'#15803d'},{f:'#16a34a',o:.15,lc:'#16a34a'},{f:'#14532d',o:.22,lc:'#14532d'}]},
+  Purple:{sw:'#7c3aed',st:'#7c3aed',g0:'#7c3aed',g1:'#a78bfa',b:[{f:'#4c1d95',o:.22,lc:'#4c1d95'},{f:'#7c3aed',o:.15,lc:'#7c3aed'},{f:'#a78bfa',o:.09,lc:'#7c3aed'},{f:'#ede9fe',o:.30,lc:'#5b21b6'},{f:'#a78bfa',o:.09,lc:'#7c3aed'},{f:'#7c3aed',o:.15,lc:'#7c3aed'},{f:'#4c1d95',o:.22,lc:'#4c1d95'}]},
+  Orange:{sw:'#ea580c',st:'#ea580c',g0:'#ea580c',g1:'#fb923c',b:[{f:'#7c2d12',o:.22,lc:'#7c2d12'},{f:'#ea580c',o:.15,lc:'#ea580c'},{f:'#fb923c',o:.09,lc:'#c2410c'},{f:'#fed7aa',o:.30,lc:'#9a3412'},{f:'#fb923c',o:.09,lc:'#c2410c'},{f:'#ea580c',o:.15,lc:'#ea580c'},{f:'#7c2d12',o:.22,lc:'#7c2d12'}]},
+  Yellow:{sw:'#ca8a04',st:'#b45309',g0:'#ca8a04',g1:'#fbbf24',b:[{f:'#713f12',o:.22,lc:'#713f12'},{f:'#ca8a04',o:.16,lc:'#a16207'},{f:'#fbbf24',o:.10,lc:'#b45309'},{f:'#fef9c3',o:.32,lc:'#854d0e'},{f:'#fbbf24',o:.10,lc:'#b45309'},{f:'#ca8a04',o:.16,lc:'#a16207'},{f:'#713f12',o:.22,lc:'#713f12'}]},
+  Teal:  {sw:'#0d9488',st:'#0d9488',g0:'#0d9488',g1:'#2dd4bf',b:[{f:'#134e4a',o:.22,lc:'#134e4a'},{f:'#0d9488',o:.15,lc:'#0d9488'},{f:'#2dd4bf',o:.09,lc:'#0f766e'},{f:'#ccfbf1',o:.30,lc:'#115e59'},{f:'#2dd4bf',o:.09,lc:'#0f766e'},{f:'#0d9488',o:.15,lc:'#0d9488'},{f:'#134e4a',o:.22,lc:'#134e4a'}]},
+  Pink:  {sw:'#db2777',st:'#db2777',g0:'#db2777',g1:'#f472b6',b:[{f:'#831843',o:.22,lc:'#831843'},{f:'#db2777',o:.15,lc:'#db2777'},{f:'#f472b6',o:.09,lc:'#be185d'},{f:'#fce7f3',o:.30,lc:'#9d174d'},{f:'#f472b6',o:.09,lc:'#be185d'},{f:'#db2777',o:.15,lc:'#db2777'},{f:'#831843',o:.22,lc:'#831843'}]},
+  Slate: {sw:'#475569',st:'#475569',g0:'#334155',g1:'#94a3b8',b:[{f:'#0f172a',o:.22,lc:'#0f172a'},{f:'#475569',o:.15,lc:'#334155'},{f:'#94a3b8',o:.09,lc:'#475569'},{f:'#e2e8f0',o:.32,lc:'#334155'},{f:'#94a3b8',o:.09,lc:'#475569'},{f:'#475569',o:.15,lc:'#334155'},{f:'#0f172a',o:.22,lc:'#0f172a'}]},
+};
+const TORD=['Blue','Red','Green','Purple','Orange','Yellow','Teal','Pink','Slate'];
+
+/* ── math ── */
+const gauss=(x,sd)=>Math.exp(-.5*((x-MEAN)/sd)**2)/(sd*Math.sqrt(2*Math.PI));
+function erf(x){const[a1,a2,a3,a4,a5,p]=[.254829592,-.284496736,1.421413741,-1.453152027,1.061405429,.3275911];const s=x<0?-1:1;x=Math.abs(x);const t=1/(1+p*x);return s*(1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x));}
+const normCDF=z=>.5*(1+erf(z/Math.sqrt(2)));
+const toPR=(s,sd)=>{const p=normCDF((s-MEAN)/sd)*100;return p<.5?'<1':p>99.5?'>99':String(Math.round(p));};
+const toStd=(v,type,sd)=>({standard:v,t:MEAN+((v-50)/10)*sd,scaled:MEAN+((v-10)/3)*sd,z:MEAN+v*sd}[type]??v);
+
+/* ── band label translations ── */
+const BAND_LABELS={
+  en:{
+    labels:['Extremely Low','Very Low','Below Average','Average','Above Average','High','Extremely High'],
+    abbrs: ['EL','VL','BA','Avg','AA','H','EH'],
+  },
+  es:{
+    labels:['Extremadamente Bajo','Muy Bajo','Por Debajo del Promedio','Promedio','Por Encima del Promedio','Alto','Extremadamente Alto'],
+    abbrs: ['EB','MB','BP','Pro','SP','Al','EA'],
+  },
+  yue:{
+    labels:['極低','非常低','低於平均','平均','高於平均','高','極高'],
+    abbrs: ['極低','非低','低均','均','高均','高','極高'],
+  },
+};
+
+/* ── bands ── */
+const mkBands=(sd,t,lang='en')=>{const c=z=>MEAN+z*sd,B=TH[t].b,L=BAND_LABELS[lang]||BAND_LABELS.en;return[
+  {min:-Infinity,max:c(-2),      label:L.labels[0],abbr:L.abbrs[0],...B[0]},
+  {min:c(-2),    max:c(-1.333),  label:L.labels[1],abbr:L.abbrs[1],...B[1]},
+  {min:c(-1.333),max:c(-0.667),  label:L.labels[2],abbr:L.abbrs[2],...B[2]},
+  {min:c(-0.667),max:c(0.667),   label:L.labels[3],abbr:L.abbrs[3],...B[3]},
+  {min:c(0.667), max:c(1.333),   label:L.labels[4],abbr:L.abbrs[4],...B[4]},
+  {min:c(1.333), max:c(2),       label:L.labels[5],abbr:L.abbrs[5],...B[5]},
+  {min:c(2),     max:Infinity,   label:L.labels[6],abbr:L.abbrs[6],...B[6]},
+];};
+const bandFor=(s,bands)=>bands.find(b=>s>=b.min&&s<b.max)??bands[3];
+
+const PAL=[
+  {bg:'#1d4ed8',lt:'#dbeafe',dk:'#1e3a8a'},{bg:'#15803d',lt:'#dcfce7',dk:'#14532d'},
+  {bg:'#7c3aed',lt:'#ede9fe',dk:'#4c1d95'},{bg:'#c2410c',lt:'#ffedd5',dk:'#7c2d12'},
+  {bg:'#be185d',lt:'#fce7f3',dk:'#831843'},{bg:'#0e7490',lt:'#cffafe',dk:'#164e63'},
+  {bg:'#a16207',lt:'#fef9c3',dk:'#78350f'},{bg:'#374151',lt:'#f3f4f6',dk:'#111827'},
+];
+const STYPES=[{v:'standard',l:'Standard Score (M=100)'},{v:'t',l:'T-Score (M=50, SD=10)'},{v:'scaled',l:'Scaled Score (M=10, SD=3)'},{v:'z',l:'Z-Score (M=0, SD=1)'}];
+const SFULL={standard:'Standard',t:'T-Score',scaled:'Scaled',z:'Z-Score'};
+
+/* ── label width (curve mode) ── */
+const lblW=(name,pr,showPR)=>{
+  const scoreTxt=showPR?`000  ·  PR: ${pr}`:'000';
+  return Math.max(80,Math.max(name.length*5.6+12+24,scoreTxt.length*5.2+12));
+};
+
+/* ── x-only packer (curve mode) ── */
+function packX(items,xFn,showPR){
+  const rows=[];const placed=[];
+  items.forEach(it=>{
+    const w=lblW(it.name,it.pr,showPR);
+    const cx=xFn(it.std100);
+    const lx=Math.max(ML,Math.min(cx-w/2,ML+IW-w));
+    let row=0;
+    for(;;){
+      if(!rows[row])rows[row]=[];
+      if(!rows[row].some(r=>lx<r.x2+4&&lx+w>r.x1-4)){rows[row].push({x1:lx,x2:lx+w});placed.push({...it,w,lx,row,cx});break;}
+      row++;
+    }
+  });
+  return{placed,maxRow:placed.length?Math.max(...placed.map(p=>p.row)):0};
+}
+
+function App(){
+  const[sd,setSd]=useState(15);
+  const[theme,setTheme]=useState('Blue');
+  const[layout,setLayout]=useState('curve');   // 'curve' | 'profile'
+  const[items,setItems]=useState([]);
+  const[showBands,setShowBands]=useState(true);
+  const[showPR,setShowPR]=useState(true);
+  const[showCallouts,setShowCallouts]=useState(true);
+  const[lang,setLang]=useState('en');
+  const[palMap,setPalMap]=useState({});
+  const[cOrder,setCOrder]=useState([]);
+  const[fName,setFName]=useState('');
+  const[fCluster,setFCluster]=useState('');
+  const[fType,setFType]=useState('standard');
+  const[fVal,setFVal]=useState('');
+
+  const T=TH[theme];
+  const bands=useMemo(()=>mkBands(sd,theme,lang),[sd,theme,lang]);
+
+  function getPal(cluster){
+    const k=cluster.trim()||'Ungrouped';
+    if(palMap[k])return palMap[k];
+    const pal=PAL[Object.keys(palMap).length%PAL.length];
+    setPalMap(p=>({...p,[k]:pal}));setCOrder(o=>o.includes(k)?o:[...o,k]);
+    return pal;
+  }
+
+  const dispItems=useMemo(()=>items.map(it=>{
+    const std100=toStd(it.iv,it.type,sd);
+    return{...it,std100,pr:toPR(std100,sd),band:bandFor(std100,bands)};
+  }),[items,sd,bands]);
+
+  function submit(e){
+    e.preventDefault();const num=parseFloat(fVal);if(isNaN(num))return;
+    const cluster=fCluster.trim()||'Ungrouped';const pal=getPal(cluster);
+    setItems(p=>[...p,{id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:fName.trim()||'Score',cluster,type:fType,iv:num,pal}]);
+    setFName('');setFVal('');
+  }
+
+  /* ── CURVE MODE geometry ── */
+  const xFn=s=>ML+((s-XMIN)/(XMAX-XMIN))*IW;
+  const{placed:raw,maxRow}=useMemo(
+    ()=>dispItems.length&&layout==='curve'?packX(dispItems,xFn,showPR):{placed:[],maxRow:0},
+    [dispItems,showPR,layout]
+  );
+  const CURVE_H=Math.max(BASE_CURVE_H,maxRow*STACK_STEP+BOX_H+16);
+  const curveTop=MT+ABOVE_H;
+  const curveBot=curveTop+CURVE_H;
+
+  const maxG=useMemo(()=>gauss(MEAN,sd),[sd]);
+  const gY=x=>curveTop+CURVE_H-(gauss(x,sd)/maxG)*(CURVE_H-10);
+
+  const placed=useMemo(()=>raw.map(p=>({...p,lTop:curveTop+p.row*STACK_STEP})),[raw,curveTop]);
+
+  const curvePts=useMemo(()=>{
+    const N=320;
+    return Array.from({length:N+1},(_,i)=>{const x=XMIN+(i/N)*(XMAX-XMIN);return`${i===0?'M':'L'}${xFn(x).toFixed(1)} ${gY(x).toFixed(1)}`;}).join(' ');
+  },[sd,curveTop,CURVE_H]);
+  const fillPath=curvePts+` L${xFn(XMAX)} ${curveBot} L${xFn(XMIN)} ${curveBot} Z`;
+
+  /* ── PROFILE MODE geometry ── */
+  const pXFn=s=>PML+((s-XMIN)/(XMAX-XMIN))*PIW;
+  const profCurveTop=MT+ABOVE_H;
+  const profCurveBot=profCurveTop+PROFILE_CURVE_H;
+  const profMaxG=maxG;
+  const pGY=x=>profCurveTop+PROFILE_CURVE_H-(gauss(x,sd)/profMaxG)*(PROFILE_CURVE_H-10);
+  const profCurvePts=useMemo(()=>{
+    const N=320;
+    return Array.from({length:N+1},(_,i)=>{const x=XMIN+(i/N)*(XMAX-XMIN);return`${i===0?'M':'L'}${pXFn(x).toFixed(1)} ${pGY(x).toFixed(1)}`;}).join(' ');
+  },[sd,profCurveTop]);
+  const profFillPath=profCurvePts+` L${pXFn(XMAX)} ${profCurveBot} L${pXFn(XMIN)} ${profCurveBot} Z`;
+  const rowsStartY=profCurveBot+ROW_SEP;
+  const profSVG_H=rowsStartY+dispItems.length*ROW_H+MB;
+
+  /* shared */
+  const SVG_H=layout==='curve'?curveBot+MB:profSVG_H;
+  const activeXFn=layout==='curve'?xFn:pXFn;
+  const activeML=layout==='curve'?ML:PML;
+  const activeIW=layout==='curve'?IW:PIW;
+
+  const sdTicks=useMemo(()=>{const t=[];for(let z=-4;z<=4;z++){const s=MEAN+z*sd;if(s>=XMIN&&s<=XMAX)t.push({s,z});}return t;},[sd]);
+  const prTicks=useMemo(()=>[-3,-2,-1,0,1,2,3].map(z=>({z,s:MEAN+z*sd,pr:['<1','2','16','50','84','98','>99'][z+3]})).filter(t=>t.s>=XMIN&&t.s<=XMAX),[sd]);
+
+  const strengths=dispItems.filter(it=>it.std100>=MEAN+.667*sd);
+  const needs    =dispItems.filter(it=>it.std100< MEAN-.667*sd);
+
+  const tableGroups=useMemo(()=>{
+    if(!dispItems.length)return[];
+    const gmap=new Map(),order=[];
+    dispItems.forEach(it=>{if(!gmap.has(it.cluster)){gmap.set(it.cluster,[]);order.push(it.cluster);}gmap.get(it.cluster).push(it);});
+    return order.map(k=>({cluster:k,rows:gmap.get(k),pal:gmap.get(k)[0].pal}));
+  },[dispItems]);
+
+  /* shared curve renderer (used in both modes) */
+  function renderCurve(xF,cTop,cBot,CH,curvePtsStr,fillPStr){
+    return(<>
+      {showBands&&bands.map((b,i)=>{
+        const x1=Math.max(XMIN,isFinite(b.min)?b.min:XMIN);
+        const x2=Math.min(XMAX,isFinite(b.max)?b.max:XMAX);
+        const W=xF(x2)-xF(x1);if(W<=0)return null;
+        const cx=xF((x1+x2)/2);
+        return(<g key={i}>
+          <rect x={xF(x1)} y={cTop} width={W} height={CH} fill={b.f} opacity={b.o}/>
+          {W>38&&<text x={cx} y={cBot-6} textAnchor="middle" fontSize={W>90?8:6.5} fill={b.lc} opacity={.88} fontFamily="'EB Garamond',Georgia,serif" fontWeight="700" letterSpacing="0.04em">{W>90?b.label:b.abbr}</text>}
+        </g>);
+      })}
+      {showBands&&bands.slice(0,-1).map((b,i)=>{
+        const x=isFinite(b.max)?b.max:null;if(!x||x<=XMIN||x>=XMAX)return null;
+        return<line key={i} x1={xF(x)} y1={cTop} x2={xF(x)} y2={cBot} stroke={T.st} strokeWidth={.4} opacity={.18}/>;
+      })}
+      {sdTicks.map(({s,z})=>(
+        <line key={s} x1={xF(s)} y1={cTop} x2={xF(s)} y2={cBot} stroke={z===0?'#888':'#d1d5db'} strokeWidth={z===0?1.5:.65} strokeDasharray={z!==0?'3 4':'none'} opacity={.7}/>
+      ))}
+      {sdTicks.filter(({z})=>z!==0&&z%1===0).map(({s,z})=>(
+        <text key={`sl${z}`} x={xF(s)} y={cTop-4} textAnchor="middle" fontSize={8} fill="#888" opacity={.75} fontFamily="'DM Mono',monospace">{z>0?`+${z}SD`:`${z}SD`}</text>
+      ))}
+      <text x={xF(MEAN)} y={cTop-4} textAnchor="middle" fontSize={8} fill="#888" opacity={.75} fontFamily="'DM Mono',monospace">Mean</text>
+      <path d={fillPStr} fill="url(#cfill)"/>
+      <path d={curvePtsStr} fill="none" stroke={T.st} strokeWidth={2.5} strokeLinecap="round"/>
+    </>);
+  }
+
+  const Lbl=({c})=><div style={{fontSize:10,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:'#666',marginBottom:4}}>{c}</div>;
+  const sb=a=>({padding:'4px 14px',borderRadius:5,border:'none',fontSize:14,background:a?'white':'transparent',color:a?'#111':'#777',fontWeight:a?600:400,boxShadow:a?'0 1px 4px rgba(0,0,0,.12)':'none',transition:'all .15s'});
+
+  return(
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
+
+      {/* top bar */}
+      <div className="no-print" style={{background:'white',borderBottom:'1.5px solid #d6d0c8',padding:'10px 22px',display:'flex',alignItems:'center',gap:14,flexWrap:'wrap',position:'sticky',top:0,zIndex:10,boxShadow:'0 1px 8px rgba(0,0,0,.06)'}}>
+        <span style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:600,fontSize:22,letterSpacing:'-.02em',color:'#111',flexShrink:0,fontStyle:'italic'}}>Curve it.</span>
+        <span style={{width:1,height:20,background:'#d6d0c8',flexShrink:0}}/>
+
+        {/* layout toggle */}
+        <div style={{display:'flex',gap:2,background:'#eeebe5',borderRadius:7,padding:2,flexShrink:0}}>
+          {[['curve','Curve'],['profile','Profile']].map(([v,l])=>(
+            <button key={v} onClick={()=>setLayout(v)} style={sb(layout===v)}>{l}</button>
+          ))}
+        </div>
+        <span style={{width:1,height:20,background:'#d6d0c8',flexShrink:0}}/>
+
+        <div style={{display:'flex',gap:2,background:'#eeebe5',borderRadius:7,padding:2,flexShrink:0}}>
+          {[15,10].map(v=><button key={v} onClick={()=>setSd(v)} style={sb(sd===v)}>SD {v}</button>)}
+        </div>
+        {[[showBands,setShowBands,'Bands'],[showPR,setShowPR,'Percentile Ranks'],[showCallouts,setShowCallouts,'Strengths & Needs']].map(([val,set,lbl])=>(
+          <label key={lbl} style={{display:'flex',alignItems:'center',gap:5,fontSize:14,color:'#111',cursor:'pointer',userSelect:'none',flexShrink:0}}>
+            <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} style={{width:'auto',border:'none',padding:0,accentColor:'#333'}}/>{lbl}
+          </label>
+        ))}
+        <span style={{width:1,height:20,background:'#d6d0c8',flexShrink:0}}/>
+        <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
+          <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:'#888',whiteSpace:'nowrap'}}>Curve Color</span>
+          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+            {TORD.map(t=>{const th=TH[t],a=theme===t;return<button key={t} title={t} onClick={()=>setTheme(t)} style={{width:20,height:20,borderRadius:'50%',border:'none',padding:0,background:th.sw,cursor:'pointer',boxShadow:a?`0 0 0 2px white,0 0 0 3.5px ${th.sw}`:'0 1px 3px rgba(0,0,0,.2)',transform:a?'scale(1.18)':'scale(1)',transition:'all .15s'}}/>;})}</div>
+        </div>
+        <span style={{width:1,height:20,background:'#d6d0c8',flexShrink:0}}/>
+        <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+          <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:'#888',whiteSpace:'nowrap'}}>Language</span>
+          <div style={{display:'flex',gap:2,background:'#eeebe5',borderRadius:7,padding:2}}>
+            {[['en','EN'],['es','ES'],['yue','粵']].map(([v,l])=>(
+              <button key={v} onClick={()=>setLang(v)} style={sb(lang===v)}>{l}</button>
+            ))}
           </div>
-        );
-      }
+        </div>
+        <div style={{flex:1}}/>
+        <button onClick={()=>window.print()} style={{padding:'6px 18px',background:'#111',color:'white',border:'none',borderRadius:7,fontSize:14,flexShrink:0}}>Print / PDF</button>
+      </div>
 
-      ReactDOM.createRoot(document.getElementById("root")).render(<BellCurveDashboard />);
-    </script>
-  </body>
+      {/* form */}
+      <form className="no-print" onSubmit={submit} style={{background:'#f8f5f0',borderBottom:'1px solid #d6d0c8',padding:'12px 22px',display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+        <div style={{flex:'3 1 150px'}}><Lbl c="Subtest / Composite Name"/><input value={fName} onChange={e=>setFName(e.target.value)} placeholder="e.g. Block Design" required/></div>
+        <div style={{flex:'2 1 130px'}}><Lbl c="Cluster / Battery"/><input value={fCluster} onChange={e=>setFCluster(e.target.value)} placeholder="Ungrouped" list="cl"/><datalist id="cl">{cOrder.map(k=><option key={k} value={k}/>)}</datalist></div>
+        <div style={{flex:'2 1 180px'}}><Lbl c="Score Type"/><select value={fType} onChange={e=>setFType(e.target.value)}>{STYPES.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}</select></div>
+        <div style={{flex:'0 1 78px'}}><Lbl c="Value"/><input type="number" step="any" value={fVal} onChange={e=>setFVal(e.target.value)} placeholder="85" required/></div>
+        <button type="submit" style={{padding:'8px 22px',background:'#111',color:'white',border:'none',borderRadius:8,fontSize:15,height:38,flexShrink:0}}>+ Add</button>
+      </form>
+
+      {/* chips */}
+      {dispItems.length>0&&(
+        <div className="no-print" style={{background:'white',borderBottom:'1px solid #e8e4dc',padding:'7px 22px',display:'flex',gap:5,flexWrap:'wrap',alignItems:'center'}}>
+          <span style={{fontSize:10,fontWeight:700,color:'#999',letterSpacing:'0.09em',textTransform:'uppercase',marginRight:3,flexShrink:0}}>{dispItems.length} score{dispItems.length!==1?'s':''}</span>
+          {dispItems.map(it=>(
+            <span key={it.id} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 8px 3px 6px',background:it.pal.lt,border:`1.5px solid ${it.pal.bg}40`,borderRadius:20,fontSize:13,color:'#111'}}>
+              <span style={{width:7,height:7,borderRadius:'50%',background:it.pal.bg,flexShrink:0}}/>
+              <span style={{fontWeight:600}}>{it.name}</span>
+              {it.cluster!=='Ungrouped'&&<span style={{opacity:.5,fontSize:11.5}}>· {it.cluster}</span>}
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:10.5,opacity:.55}}>{it.iv}</span>
+              <button onClick={()=>setItems(p=>p.filter(i=>i.id!==it.id))} style={{background:'none',border:'none',color:'#666',fontSize:15,lineHeight:1,padding:0}}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{flex:1,padding:'16px 22px 30px',overflow:'auto'}}>
+
+        {/* callouts */}
+        {showCallouts&&(strengths.length>0||needs.length>0)&&(
+          <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+            {needs.length>0&&<div style={{flex:'1 1 220px',background:'#fafafa',border:'1.5px solid #ddd',borderRadius:10,padding:'9px 15px',display:'flex',gap:10,alignItems:'flex-start'}}><span style={{fontSize:18,lineHeight:1,marginTop:2}}>↙</span><div><div style={{fontSize:10,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:'#111',marginBottom:3}}>Areas of Challenge</div><div style={{fontSize:13.5,color:'#333',lineHeight:1.6}}>{needs.map(it=>`${it.name} (PR: ${it.pr})`).join('  ·  ')}</div></div></div>}
+            {strengths.length>0&&<div style={{flex:'1 1 220px',background:'#fafafa',border:'1.5px solid #ddd',borderRadius:10,padding:'9px 15px',display:'flex',gap:10,alignItems:'flex-start'}}><span style={{fontSize:18,lineHeight:1,marginTop:2}}>↗</span><div><div style={{fontSize:10,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:'#111',marginBottom:3}}>Relative Strengths</div><div style={{fontSize:13.5,color:'#333',lineHeight:1.6}}>{strengths.map(it=>`${it.name} (PR: ${it.pr})`).join('  ·  ')}</div></div></div>}
+          </div>
+        )}
+
+        {/* chart */}
+        <div className="chart-card print-section" style={{background:'white',borderRadius:16,border:'1px solid #d6d0c8',boxShadow:'0 4px 28px rgba(0,0,0,.07)',overflow:'hidden',minWidth:640}}>
+          <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{display:'block',width:'100%',height:'auto'}} preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <linearGradient id="cfill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={T.g0} stopOpacity=".20"/>
+                <stop offset="72%" stopColor={T.g1} stopOpacity=".06"/>
+                <stop offset="100%" stopColor={T.g1} stopOpacity="0"/>
+              </linearGradient>
+              <filter id="lshadow" x="-8%" y="-20%" width="116%" height="160%">
+                <feDropShadow dx="0" dy="1" stdDeviation="1.5" floodOpacity=".10"/>
+              </filter>
+            </defs>
+
+            {/* ══ CURVE MODE ══ */}
+            {layout==='curve'&&<>
+              {renderCurve(xFn,curveTop,curveBot,CURVE_H,curvePts,fillPath)}
+
+              {/* on-curve compact markers */}
+              {placed.map(p=>{
+                const t=p.lTop;
+                const score=String(Math.round(p.std100));
+                const prTxt=showPR?`  ·  PR: ${p.pr}`:'';
+                return(
+                  <g key={p.id} opacity={0.9} filter="url(#lshadow)">
+                    <rect x={p.lx} y={t} width={p.w} height={BOX_H} rx={5} fill={p.pal.lt} fillOpacity={0.75} stroke={p.pal.bg} strokeWidth={1.1} strokeOpacity={.5}/>
+                    <rect x={p.lx} y={t+4} width={2} height={BOX_H-8} rx={1} fill={p.pal.bg}/>
+                    <rect x={p.lx+p.w-24} y={t+4} width={20} height={10} rx={3} fill={p.band.f} fillOpacity={.6} stroke={p.band.lc} strokeWidth={.6} strokeOpacity={.5}/>
+                    <text x={p.lx+p.w-14} y={t+11.5} textAnchor="middle" fontSize={6.5} fill={p.band.lc} fontFamily="'EB Garamond',Georgia,serif" fontWeight="700">{p.band.abbr}</text>
+                    <text x={p.lx+8} y={t+10} fontSize={9} fontWeight="600" fill="#111" fontFamily="'EB Garamond',Georgia,serif">{p.name}</text>
+                    <text x={p.lx+8} y={t+19.5} fontSize={8.5} fill={p.pal.bg} fontFamily="'DM Mono',monospace" fontWeight="500">{score}<tspan fill="#555" fontSize={8}>{prTxt}</tspan></text>
+                  </g>
+                );
+              })}
+
+              {dispItems.length===0&&<text x={SVG_W/2} y={curveTop+CURVE_H/2} textAnchor="middle" fontSize={13} fill="#ccc" fontStyle="italic" fontFamily="'EB Garamond',Georgia,serif">Add scores above to place them on the curve</text>}
+
+              {/* axis */}
+              <line x1={xFn(XMIN)} y1={curveBot} x2={xFn(XMAX)} y2={curveBot} stroke="#aaa" strokeWidth={1}/>
+              {sdTicks.map(({s,z})=>(
+                <g key={`ax${s}`}>
+                  <line x1={xFn(s)} y1={curveBot} x2={xFn(s)} y2={curveBot+6} stroke="#aaa" strokeWidth={1}/>
+                  <text x={xFn(s)} y={curveBot+20} textAnchor="middle" fontSize={12.5} fill={z===0?'#111':'#333'} fontFamily="'DM Mono',monospace" fontWeight={z===0?'600':'400'}>{s}</text>
+                </g>
+              ))}
+              {prTicks.map(({s,pr})=>(
+                <text key={`pr${s}`} x={xFn(s)} y={curveBot+36} textAnchor="middle" fontSize={9.5} fill="#666" fontFamily="'EB Garamond',Georgia,serif">{pr.startsWith('<')||pr.startsWith('>')?`${pr}%ile`:`${pr}th%ile`}</text>
+              ))}
+              <text x={ML} y={curveBot+54} fontSize={7.5} fill="#c0bcb4" fontFamily="'EB Garamond',serif" fontWeight="700" letterSpacing="0.09em">STANDARD SCORE</text>
+              <text x={ML} y={curveBot+65} fontSize={7.5} fill="#c0bcb4" fontFamily="'EB Garamond',serif" fontWeight="700" letterSpacing="0.09em">PERCENTILE RANK</text>
+              {(()=>{const lo=MEAN-.667*sd,hi=MEAN+.667*sd,ax1=xFn(lo),ax2=xFn(hi),bY=curveBot+53;return(
+                <g opacity={.38}><line x1={ax1} y1={bY} x2={ax2} y2={bY} stroke={T.st} strokeWidth={1.4}/><line x1={ax1} y1={bY-4} x2={ax1} y2={bY+4} stroke={T.st} strokeWidth={1.4}/><line x1={ax2} y1={bY-4} x2={ax2} y2={bY+4} stroke={T.st} strokeWidth={1.4}/><text x={(ax1+ax2)/2} y={bY-4} textAnchor="middle" fontSize={7} fill={T.st} fontFamily="'EB Garamond',serif" fontWeight="700" letterSpacing="0.06em">AVERAGE RANGE</text></g>
+              );})()}
+            </>}
+
+            {/* ══ PROFILE MODE ══ */}
+            {layout==='profile'&&<>
+              {/* curve (shorter, clean) */}
+              {renderCurve(pXFn,profCurveTop,profCurveBot,PROFILE_CURVE_H,profCurvePts,profFillPath)}
+
+              {/* band gradient fills extend from curve bottom down through all rows */}
+              {(()=>{
+                const rowsEnd=rowsStartY+dispItems.length*ROW_H;
+                return bands.map((b,i)=>{
+                  const x1=Math.max(XMIN,isFinite(b.min)?b.min:XMIN);
+                  const x2=Math.min(XMAX,isFinite(b.max)?b.max:XMAX);
+                  const W=pXFn(x2)-pXFn(x1);
+                  if(W<=0)return null;
+                  return<rect key={i} x={pXFn(x1)} y={profCurveBot} width={W} height={rowsEnd-profCurveBot} fill={b.f} opacity={b.o}/>;
+                });
+              })()}
+
+              {/* separator line */}
+              <line x1={PML} y1={profCurveBot} x2={SVG_W-MR} y2={profCurveBot} stroke="#d1d5db" strokeWidth={1}/>
+
+              {/* SD grid lines (light) continue into rows */}
+              {sdTicks.filter(({z})=>z!==0).map(({s,z})=>(
+                <line key={`pg${s}`} x1={pXFn(s)} y1={profCurveBot} x2={pXFn(s)} y2={rowsStartY+dispItems.length*ROW_H}
+                  stroke="#d1d5db" strokeWidth={.5} strokeDasharray="3 4" opacity={.7}/>
+              ))}
+
+              {/* MEAN LINE — prominent, continuous from curve through all rows */}
+              {dispItems.length>0&&(
+                <line x1={pXFn(MEAN)} y1={profCurveBot} x2={pXFn(MEAN)} y2={rowsStartY+dispItems.length*ROW_H}
+                  stroke="#64748b" strokeWidth={1.5} opacity={.55}/>
+              )}
+
+              {/* score rows */}
+              {dispItems.map((it,i)=>{
+                const y0=rowsStartY+i*ROW_H;
+                const yMid=y0+ROW_H/2;
+                const dotX=pXFn(it.std100);
+                const meanX=pXFn(MEAN);
+
+                // dynamic font size so full name fits in label column
+                const labelW=PML-12;
+                const nameFontSize=Math.min(10,Math.max(6.5,labelW/(it.name.length*0.58)));
+                const bandFontSize=Math.max(6,nameFontSize-1.5);
+
+                return(<g key={it.id}>
+                  {/* row background */}
+                  <rect x={0} y={y0} width={SVG_W} height={ROW_H} fill={i%2===0?'rgba(255,255,255,0.55)':'rgba(255,255,255,0.25)'}/>
+                  {/* cluster color bar */}
+                  <rect x={0} y={y0+3} width={3} height={ROW_H-6} rx={1.5} fill={it.pal.bg}/>
+
+                  {/* left label: full name (dynamic size) + qualitative range + score */}
+                  <text x={8} y={yMid-1.5} fontSize={nameFontSize} fontWeight="600" fill="#111"
+                    fontFamily="'EB Garamond',Georgia,serif">{it.name}</text>
+                  <text x={8} y={yMid+bandFontSize+1} fontSize={bandFontSize} fill={it.band.lc}
+                    fontFamily="'EB Garamond',Georgia,serif" fontStyle="italic">{it.band.label}
+                    <tspan fontStyle="normal" fontFamily="'DM Mono',monospace" fill={it.pal.bg} dx={4}>{Math.round(it.std100)}</tspan>
+                  </text>
+
+                  {/* horizontal connector: dot → mean line */}
+                  <line
+                    x1={Math.min(dotX,meanX)} y1={yMid}
+                    x2={Math.max(dotX,meanX)} y2={yMid}
+                    stroke={it.pal.bg} strokeWidth={1.4} strokeDasharray="4 3" opacity={.6}/>
+
+                  {/* dot */}
+                  <circle cx={dotX} cy={yMid} r={5} fill={it.pal.bg}/>
+                  <circle cx={dotX} cy={yMid} r={2} fill="white"/>
+                </g>);
+              })}
+
+              {dispItems.length===0&&<text x={SVG_W/2} y={profCurveTop+PROFILE_CURVE_H/2} textAnchor="middle" fontSize={13} fill="#ccc" fontStyle="italic" fontFamily="'EB Garamond',Georgia,serif">Add scores above to place them on the curve</text>}
+
+              {/* axis below rows */}
+              {(()=>{
+                const axY=rowsStartY+dispItems.length*ROW_H+4;
+                return(<>
+                  <line x1={pXFn(XMIN)} y1={axY} x2={pXFn(XMAX)} y2={axY} stroke="#aaa" strokeWidth={1}/>
+                  {sdTicks.map(({s,z})=>(
+                    <g key={`pax${s}`}>
+                      <line x1={pXFn(s)} y1={axY} x2={pXFn(s)} y2={axY+5} stroke="#aaa" strokeWidth={1}/>
+                      <text x={pXFn(s)} y={axY+17} textAnchor="middle" fontSize={11} fill={z===0?'#111':'#444'} fontFamily="'DM Mono',monospace" fontWeight={z===0?'600':'400'}>{s}</text>
+                    </g>
+                  ))}
+                  {prTicks.map(({s,pr})=>(
+                    <text key={`ppr${s}`} x={pXFn(s)} y={axY+30} textAnchor="middle" fontSize={8.5} fill="#666" fontFamily="'EB Garamond',Georgia,serif">{pr.startsWith('<')||pr.startsWith('>')?`${pr}%ile`:`${pr}th%ile`}</text>
+                  ))}
+                  {(()=>{const lo=MEAN-.667*sd,hi=MEAN+.667*sd,ax1=pXFn(lo),ax2=pXFn(hi),bY=axY+42;return(
+                    <g opacity={.4}><line x1={ax1} y1={bY} x2={ax2} y2={bY} stroke={T.st} strokeWidth={1.4}/><line x1={ax1} y1={bY-4} x2={ax1} y2={bY+4} stroke={T.st} strokeWidth={1.4}/><line x1={ax2} y1={bY-4} x2={ax2} y2={bY+4} stroke={T.st} strokeWidth={1.4}/><text x={(ax1+ax2)/2} y={bY-4} textAnchor="middle" fontSize={7} fill={T.st} fontFamily="'EB Garamond',serif" fontWeight="700" letterSpacing="0.06em">AVERAGE RANGE</text></g>
+                  );})()}
+                </>);
+              })()}
+            </>}
+          </svg>
+        </div>
+
+        {/* legend */}
+        <div style={{marginTop:11,display:'flex',gap:5,flexWrap:'wrap'}}>
+          {bands.map(b=>(
+            <span key={b.abbr} style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:13,color:'#111',background:b.f,border:`1px solid ${b.lc}20`,borderRadius:5,padding:'3px 9px',fontWeight:600,opacity:.9}}>
+              <span style={{width:8,height:8,borderRadius:2,background:b.lc,flexShrink:0,opacity:.65}}/>{b.label}
+            </span>
+          ))}
+        </div>
+
+        {/* table */}
+        {tableGroups.length>0&&(
+          <div className="print-section" style={{marginTop:20,background:'white',borderRadius:14,border:'1px solid #d6d0c8',overflow:'hidden',boxShadow:'0 2px 14px rgba(0,0,0,.05)'}}>
+            <div style={{padding:'13px 20px',borderBottom:'1px solid #e8e4dc',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <span style={{fontWeight:600,fontSize:18,fontFamily:"'Cormorant Garamond',serif",letterSpacing:'-.01em',color:'#111',fontStyle:'italic'}}>Score Summary</span>
+              <button className="no-print" onClick={()=>window.print()} style={{padding:'5px 16px',background:'#111',color:'white',border:'none',borderRadius:7,fontSize:13}}>Export PDF</button>
+            </div>
+            {tableGroups.map(({cluster,rows,pal},gi)=>(
+              <div key={cluster} style={{borderBottom:gi<tableGroups.length-1?'2px solid #e8e4dc':'none'}}>
+                <div style={{padding:'8px 20px 6px',background:`${pal.bg}0d`,borderBottom:'1px solid #e8e4dc',display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{width:10,height:10,borderRadius:2,background:pal.bg,flexShrink:0,display:'inline-block'}}/>
+                  <span style={{fontSize:11,fontWeight:700,letterSpacing:'0.08em',textTransform:'uppercase',color:'#111'}}>{cluster}</span>
+                  <span style={{fontSize:10.5,color:'#888',fontFamily:"'DM Mono',monospace"}}>{rows.length} score{rows.length!==1?'s':''}</span>
+                </div>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:14}}>
+                  <thead><tr style={{background:'#faf9f7'}}>
+                    {['Subtest / Composite','Score Type','Original Score','Standard Score','Percentile Rank','Classification'].map((h,i)=>(
+                      <th key={i} style={{padding:'7px 16px',textAlign:'left',fontWeight:700,color:'#888',fontSize:9,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid #ede9e0',whiteSpace:'nowrap'}}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((it,i)=>(
+                      <tr key={it.id} style={{borderBottom:'1px solid #f4f1ec',background:i%2===1?'#faf9f7':'white'}}>
+                        <td style={{padding:'9px 16px',fontWeight:500,fontSize:15,fontFamily:"'EB Garamond',serif",color:'#111'}}>{it.name}</td>
+                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:11,color:'#555'}}>{SFULL[it.type]}</td>
+                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:13,color:'#333',fontWeight:500}}>{it.iv}</td>
+                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:16,color:'#111'}}>{Math.round(it.std100)}</td>
+                        <td style={{padding:'9px 16px',fontFamily:"'DM Mono',monospace",fontSize:13,color:'#333'}}>{it.pr}</td>
+                        <td style={{padding:'9px 16px'}}>
+                          <span style={{display:'inline-block',padding:'3px 11px',borderRadius:5,background:it.band.f,color:'#111',fontSize:13,fontWeight:600,border:`1px solid ${it.band.lc}22`}}>{it.band.label}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
 </html>
