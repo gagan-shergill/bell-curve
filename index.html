@@ -15,7 +15,24 @@
     input:focus,select:focus{border-color:#555;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
     input::placeholder{color:#b0acaa;font-style:italic}
     button{font-family:'EB Garamond',Georgia,serif;cursor:pointer}
-    @media print{.no-print{display:none!important}body{background:white;font-size:12px}.print-section{break-inside:avoid}}
+    @media print{
+      .no-print{display:none!important}
+      body{background:white;font-size:12px}
+      .print-section{break-inside:avoid}
+      body::after{
+        content:'Curve it.';
+        position:fixed;
+        bottom:20px;
+        right:26px;
+        font-family:'EB Garamond',Georgia,serif;
+        font-style:italic;
+        font-weight:600;
+        font-size:15px;
+        letter-spacing:-0.02em;
+        color:rgba(0,0,0,0.13);
+        pointer-events:none;
+      }
+    }
   </style>
 </head>
 <body>
@@ -58,8 +75,9 @@ const TORD=['Blue','Red','Green','Purple','Orange','Yellow','Teal','Pink','Slate
 const gauss=(x,sd)=>Math.exp(-.5*((x-MEAN)/sd)**2)/(sd*Math.sqrt(2*Math.PI));
 function erf(x){const[a1,a2,a3,a4,a5,p]=[.254829592,-.284496736,1.421413741,-1.453152027,1.061405429,.3275911];const s=x<0?-1:1;x=Math.abs(x);const t=1/(1+p*x);return s*(1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x));}
 const normCDF=z=>.5*(1+erf(z/Math.sqrt(2)));
-const toPR=(s,sd)=>{const p=normCDF((s-MEAN)/sd)*100;return p<.5?'<1':p>99.5?'>99':String(Math.round(p));};
-const toStd=(v,type,sd)=>({standard:v,t:MEAN+((v-50)/10)*sd,scaled:MEAN+((v-10)/3)*sd,z:MEAN+v*sd}[type]??v);
+const toPR=(s)=>{const p=normCDF((s-MEAN)/15)*100;return p<.5?'<1':p>99.5?'>99':String(Math.round(p));};
+// Score conversion always uses SD=15 (standard score scale) — axis SD only affects band boundaries
+const toStd=(v,type)=>({standard:v,t:MEAN+((v-50)/10)*15,scaled:MEAN+((v-10)/3)*15,z:MEAN+v*15}[type]??v);
 
 /* ── band label translations ── */
 const BAND_LABELS={
@@ -79,14 +97,14 @@ const BAND_LABELS={
 
 /* ── bands ── */
 const mkBands=(sd,t,lang='en')=>{const c=z=>MEAN+z*sd,B=TH[t].b,L=BAND_LABELS[lang]||BAND_LABELS.en;return[
-  {min:-Infinity,max:c(-2),      label:L.labels[0],abbr:L.abbrs[0],...B[0]},
-  {min:c(-2),    max:c(-1.333),  label:L.labels[1],abbr:L.abbrs[1],...B[1]},
-  {min:c(-1.333),max:c(-0.667),  label:L.labels[2],abbr:L.abbrs[2],...B[2]},
-  {min:c(-0.667),max:c(0.667),   label:L.labels[3],abbr:L.abbrs[3],...B[3]},
-  {min:c(0.667), max:c(1.333),   label:L.labels[4],abbr:L.abbrs[4],...B[4]},
-  {min:c(1.333), max:c(2),       label:L.labels[5],abbr:L.abbrs[5],...B[5]},
-  {min:c(2),     max:Infinity,   label:L.labels[6],abbr:L.abbrs[6],...B[6]},
-];};
+  {min:-Infinity,max:c(-2),  label:L.labels[0],abbr:L.abbrs[0],...B[0]},
+  {min:c(-2),    max:c(-1.5),label:L.labels[1],abbr:L.abbrs[1],...B[1]},
+  {min:c(-1.5),  max:c(-1),  label:L.labels[2],abbr:L.abbrs[2],...B[2]},
+  {min:c(-1),    max:c(1),   label:L.labels[3],abbr:L.abbrs[3],...B[3]},
+  {min:c(1),     max:c(1.5), label:L.labels[4],abbr:L.abbrs[4],...B[4]},
+  {min:c(1.5),   max:c(2),   label:L.labels[5],abbr:L.abbrs[5],...B[5]},
+  {min:c(2),     max:Infinity,label:L.labels[6],abbr:L.abbrs[6],...B[6]},
+]};
 const bandFor=(s,bands)=>bands.find(b=>s>=b.min&&s<b.max)??bands[3];
 
 const PAL=[
@@ -138,6 +156,7 @@ function App(){
   const[fVal,setFVal]=useState('');
 
   const T=TH[theme];
+  // Bands use selected SD; z-cuts at ±1 and ±1.5 SD so Average = ±1 SD from mean
   const bands=useMemo(()=>mkBands(sd,theme,lang),[sd,theme,lang]);
 
   function getPal(cluster){
@@ -149,8 +168,8 @@ function App(){
   }
 
   const dispItems=useMemo(()=>items.map(it=>{
-    const std100=toStd(it.iv,it.type,sd);
-    return{...it,std100,pr:toPR(std100,sd),band:bandFor(std100,bands)};
+    const std100=toStd(it.iv,it.type);
+    return{...it,std100,pr:toPR(std100),band:bandFor(std100,bands)};
   }),[items,sd,bands]);
 
   function submit(e){
