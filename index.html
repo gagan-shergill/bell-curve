@@ -5,7 +5,7 @@
   <title>Curve it.</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@300;400;600&display=swap" rel="stylesheet"/>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
@@ -37,7 +37,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react" data-type="module">
+<script type="text/babel" data-presets="react">
 'use strict';
 const{useState,useMemo}=React;
 
