@@ -37,7 +37,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+<script type="text/babel" data-presets="env,react">
 'use strict';
 const{useState,useMemo}=React;
 
@@ -546,7 +546,10 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+const root = ReactDOM.createRoot(document.getElementById('root'));
+
+root.render(<App />);
+
 </script>
 </body>
 </html>
